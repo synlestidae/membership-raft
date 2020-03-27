@@ -13,6 +13,12 @@ impl Actor for AppStorage {
     type Context = Context<Self>;
 }
 
+impl storage::RaftStorage<Data, DataResponse, Error> for AppStorage {
+    type Actor = Self;
+
+    type Context = Context<Self>;
+}
+
 impl Handler<storage::GetInitialState<Error>> for AppStorage {
     type Result = ResponseActFuture<Self, storage::InitialState, Error>;
 
@@ -35,6 +41,15 @@ impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
     type Result =  ResponseActFuture<Self, Vec<messages::Entry<Data>>, Error>;
 
     fn handle(&mut self, _msg: storage::GetLogEntries<Data, Error>, _ctx: &mut Self::Context) -> Self::Result {
+        // ... snip ...
+        unimplemented!()
+    }
+}
+
+impl Handler<storage::AppendEntryToLog<Data, Error>> for AppStorage {
+    type Result = ResponseActFuture<Self, (), Error>;
+
+    fn handle(&mut self, _msg: storage::AppendEntryToLog<Data, Error>, _ctx: &mut Self::Context) -> Self::Result {
         // ... snip ...
         unimplemented!()
     }
