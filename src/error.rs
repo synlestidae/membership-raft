@@ -1,5 +1,5 @@
 use actix_raft::AppError;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std;
 
 /// The application's error struct. This could be an enum as well.

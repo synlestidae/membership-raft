@@ -1,11 +1,10 @@
-use actix::{Actor, Context, ResponseActFuture, Handler};
-use actix_raft::{RaftNetwork, messages};
-use actix_raft::messages::VoteRequest;
 use crate::Data;
-use actix_raft::messages::{InstallSnapshotRequest};
+use actix::{Actor, Context, Handler, ResponseActFuture};
+use actix_raft::messages::InstallSnapshotRequest;
 use actix_raft::messages::InstallSnapshotResponse;
+use actix_raft::messages::VoteRequest;
 use actix_raft::messages::VoteResponse;
-
+use actix_raft::{messages, RaftNetwork};
 
 /// Your application's network interface actor.
 struct AppNetwork {/* ... snip ... */}
@@ -43,13 +42,16 @@ impl RaftNetwork<Data> for AppNetwork {}
     }
 }*/
 
-
 // Then you just implement the various message handlers.
 // See the network chapter for details.
 impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
     type Result = ResponseActFuture<Self, messages::AppendEntriesResponse, ()>;
 
-    fn handle(&mut self, _msg: messages::AppendEntriesRequest<Data>, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        _msg: messages::AppendEntriesRequest<Data>,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         // ... snip ...
         unimplemented!()
     }
