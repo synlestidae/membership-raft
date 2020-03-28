@@ -5,9 +5,22 @@ use actix_raft::messages::InstallSnapshotResponse;
 use actix_raft::messages::VoteRequest;
 use actix_raft::messages::VoteResponse;
 use actix_raft::{messages, RaftNetwork};
+use std::net::IpAddr;
+use crate::shared_network_state::SharedNetworkState;
+use actix::fut::result;
 
 /// Your application's network interface actor.
-struct AppNetwork {/* ... snip ... */}
+pub struct AppNetwork {
+    shared_network_state: SharedNetworkState
+}
+
+impl AppNetwork {
+    pub fn new(shared_network_state: SharedNetworkState) -> Self {
+        Self {
+            shared_network_state
+        }
+    }
+}
 
 impl Actor for AppNetwork {
     type Context = Context<Self>;
@@ -18,30 +31,6 @@ impl Actor for AppNetwork {
 // Ensure you impl this over your application's data type. Here, it is `Data`.
 impl RaftNetwork<Data> for AppNetwork {}
 
-/*impl Handler<AppendEntriesRequest<Data>> for AppNetwork {
-    type Result = AppendEntriesRequest<Data>;
-
-    fn handle(&mut self, msg: AppendEntriesRequest<Data>, ctx: &mut Self::Context) -> Self::Result {
-        unimplemented!()
-    }
-}*/
-
-/*impl Handler<VoteRequest> for AppNetwork {
-    type Result = VoteRequest;
-
-    fn handle(&mut self, msg: M, ctx: &mut Self::Context) -> Self::Result {
-        unimplemented!()
-    }
-}*/
-
-/*impl Handler<InstallSnapshotRequest> for AppNetwork {
-    type Result = InstallSnapshotRequest;
-
-    fn handle(&mut self, msg: M, ctx: &mut Self::Context) -> Self::Result {
-        unimplemented!()
-    }
-}*/
-
 // Then you just implement the various message handlers.
 // See the network chapter for details.
 impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
@@ -49,9 +38,16 @@ impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
 
     fn handle(
         &mut self,
-        _msg: messages::AppendEntriesRequest<Data>,
+        msg: messages::AppendEntriesRequest<Data>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        let node_option = self.shared_network_state.get_node(msg.target);
+
+        match node_option {
+            Some(node) => {
+            },
+            None => return Box::new(result(Err(())))
+        }
         // ... snip ...
         unimplemented!()
     }
@@ -62,7 +58,14 @@ impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
 impl Handler<InstallSnapshotRequest> for AppNetwork {
     type Result = ResponseActFuture<Self, InstallSnapshotResponse, ()>;
 
-    fn handle(&mut self, _msg: InstallSnapshotRequest, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: InstallSnapshotRequest, _ctx: &mut Self::Context) -> Self::Result {
+        let node_option = self.shared_network_state.get_node(msg.target);
+
+        match node_option {
+            Some(node) => {
+            },
+            None => return Box::new(result(Err(())))
+        }
         // ... snip ...
         unimplemented!()
     }
@@ -73,8 +76,14 @@ impl Handler<InstallSnapshotRequest> for AppNetwork {
 impl Handler<VoteRequest> for AppNetwork {
     type Result = ResponseActFuture<Self, VoteResponse, ()>;
 
-    fn handle(&mut self, _msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
-        // ... snip ...
+    fn handle(&mut self, msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
+        let node_option = self.shared_network_state.get_node(msg.target);
+
+        match node_option {
+            Some(node) => {
+            },
+            None => return Box::new(result(Err(())))
+        }
         unimplemented!()
     }
 }

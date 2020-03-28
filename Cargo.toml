@@ -11,7 +11,14 @@ actix = "0.8.3"
 actix-raft = "0.4.3"
 serde = "1.0.105"
 bincode = "1.2.1"
+actix-web = "2.0.0"
+rocket_contrib = "*"
+rocket = "*"
 
 [dependencies.tokio]
 version = "0.2.13"
 features = ["fs"]
+
+[[bin]]
+name = "test"
+path = "src/lib.rs"

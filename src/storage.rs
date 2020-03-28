@@ -6,14 +6,22 @@ use actix::{Actor, Context, Handler, ResponseActFuture};
 use actix_raft::messages;
 use actix_raft::storage;
 use std::mem;
+use serde::{Serialize, Deserialize};
+use crate::shared_network_state::SharedNetworkState;
 
+#[derive(Serialize, Deserialize)]
 pub struct AppStorage {
+    //shared_network_state: SharedNetworkState,
     snapshot_path: Option<String>,
     membership: messages::MembershipConfig,
     logs: Vec<messages::Entry<Data>>,
 }
 
 impl AppStorage {
+    pub fn new() -> Self {
+        unimplemented!()
+    }
+
     fn upsert_entry(&mut self, entry: messages::Entry<Data>) -> Result<(), Error> {
         for (i, e) in self.logs.iter_mut().enumerate() {
             if i as u64 == e.index {
@@ -30,7 +38,10 @@ impl AppStorage {
         }
     }
 
-    fn apply_to_state_machine(&mut self, _data: Data) {
+    fn apply_to_state_machine(&mut self, data: Data) {
+        match data {
+            Data::AddNode { .. } => {}
+        }
     }
 
     fn apply_entry_to_state_machine(&mut self, msg: messages::EntryPayload<Data>) {
@@ -90,7 +101,7 @@ impl Handler<storage::SaveHardState<Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::SaveHardState<Error>,
+        msg: storage::SaveHardState<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         Box::new(result(Ok(())))
@@ -159,18 +170,6 @@ impl Handler<storage::ApplyEntryToStateMachine<Data, DataResponse, Error>> for A
         let payload = msg.payload.payload.clone();
 
         self.apply_entry_to_state_machine(payload);
-        /*match payload {
-            messages::EntryPayload::Blank => {}
-            messages::EntryPayload::Normal(messages::EntryNormal { data }) => {
-                self.apply_to_state_machine(data); 
-            }
-            messages::EntryPayload::ConfigChange(messages::EntryConfigChange { membership }) => {
-                self.membership = membership; 
-            }
-            messages::EntryPayload::SnapshotPointer(messages::EntrySnapshotPointer { path }) => {
-                self.snapshot_path = Some(path); 
-            }
-        }*/
 
         Box::new(result(Ok(DataResponse::success("Successfully applied entry to state machine"))))
     }
@@ -210,7 +209,7 @@ impl Handler<storage::CreateSnapshot<Error>> for AppStorage {
             pointer: messages::EntrySnapshotPointer { 
                 path: match snapshot_path { 
                     Some(s) => s.clone(),
-                    None => unimplemented!() 
+                    None => String::from(".")
                 }
             }
         };
@@ -224,7 +223,7 @@ impl Handler<storage::InstallSnapshot<Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::InstallSnapshot<Error>,
+        msg: storage::InstallSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         Box::new(result(Ok(())))
