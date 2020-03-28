@@ -13,5 +13,5 @@ serde = "1.0.105"
 bincode = "1.2.1"
 
 [dependencies.tokio]
-tokio = "0.2.13"
+version = "0.2.13"
 features = ["fs"]

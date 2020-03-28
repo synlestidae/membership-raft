@@ -1,18 +1,52 @@
 use crate::error::Error;
-use crate::tokio::io::AsyncReadExt;
 use crate::Data;
 use crate::DataResponse;
 use actix::fut::result;
-use actix::fut::IntoActorFuture;
-use actix::fut::WrapFuture;
 use actix::{Actor, Context, Handler, ResponseActFuture};
 use actix_raft::messages;
 use actix_raft::storage;
-use actix_raft::storage::GetInitialState;
-use tokio::fs;
+use std::mem;
 
 pub struct AppStorage {
+    snapshot_path: Option<String>,
+    membership: messages::MembershipConfig,
     logs: Vec<messages::Entry<Data>>,
+}
+
+impl AppStorage {
+    fn upsert_entry(&mut self, entry: messages::Entry<Data>) -> Result<(), Error> {
+        for (i, e) in self.logs.iter_mut().enumerate() {
+            if i as u64 == e.index {
+                mem::replace(e, entry);
+                return Ok(());
+            }
+        }
+
+        if self.logs.len() == entry.index as usize {
+            self.logs.push(entry);
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn apply_to_state_machine(&mut self, _data: Data) {
+    }
+
+    fn apply_entry_to_state_machine(&mut self, msg: messages::EntryPayload<Data>) {
+        match msg {
+            messages::EntryPayload::Blank => {}
+            messages::EntryPayload::Normal(messages::EntryNormal { data }) => {
+                self.apply_to_state_machine(data); 
+            }
+            messages::EntryPayload::ConfigChange(messages::EntryConfigChange { membership }) => {
+                self.membership = membership; 
+            }
+            messages::EntryPayload::SnapshotPointer(messages::EntrySnapshotPointer { path }) => {
+                self.snapshot_path = Some(path); 
+            }
+        }
+    }
 }
 
 impl Actor for AppStorage {
@@ -86,11 +120,12 @@ impl Handler<storage::AppendEntryToLog<Data, Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::AppendEntryToLog<Data, Error>,
+        msg: storage::AppendEntryToLog<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        let new_msg = (*msg.entry).clone();
+
+        Box::new(result(self.upsert_entry(new_msg)))
     }
 }
 
@@ -99,11 +134,17 @@ impl Handler<storage::ReplicateToLog<Data, Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::ReplicateToLog<Data, Error>,
+        msg: storage::ReplicateToLog<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        for entry in (*msg.entries).clone().into_iter() {
+            match self.upsert_entry(entry) {
+                Ok(_) => {}
+                err => return Box::new(result(err)),
+            }
+        }
+
+        Box::new(result(Ok(())))
     }
 }
 
@@ -112,11 +153,26 @@ impl Handler<storage::ApplyEntryToStateMachine<Data, DataResponse, Error>> for A
 
     fn handle(
         &mut self,
-        _msg: storage::ApplyEntryToStateMachine<Data, DataResponse, Error>,
+        msg: storage::ApplyEntryToStateMachine<Data, DataResponse, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        let payload = msg.payload.payload.clone();
+
+        self.apply_entry_to_state_machine(payload);
+        /*match payload {
+            messages::EntryPayload::Blank => {}
+            messages::EntryPayload::Normal(messages::EntryNormal { data }) => {
+                self.apply_to_state_machine(data); 
+            }
+            messages::EntryPayload::ConfigChange(messages::EntryConfigChange { membership }) => {
+                self.membership = membership; 
+            }
+            messages::EntryPayload::SnapshotPointer(messages::EntrySnapshotPointer { path }) => {
+                self.snapshot_path = Some(path); 
+            }
+        }*/
+
+        Box::new(result(Ok(DataResponse::success("Successfully applied entry to state machine"))))
     }
 }
 
@@ -125,9 +181,13 @@ impl Handler<storage::ReplicateToStateMachine<Data, Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::ReplicateToStateMachine<Data, Error>,
+        msg: storage::ReplicateToStateMachine<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        for e in msg.payload {
+            self.apply_entry_to_state_machine(e.payload);
+        }
+
         // ... snip ...
         unimplemented!()
     }
@@ -141,8 +201,21 @@ impl Handler<storage::CreateSnapshot<Error>> for AppStorage {
         _msg: storage::CreateSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        let snapshot_path = self.snapshot_path.clone();
+        let latest_log = &self.logs[self.logs.len() - 1];
+        let snapshot = storage::CurrentSnapshotData {
+            term: latest_log.term,
+            index: latest_log.index,
+            membership: self.membership.clone(),
+            pointer: messages::EntrySnapshotPointer { 
+                path: match snapshot_path { 
+                    Some(s) => s.clone(),
+                    None => unimplemented!() 
+                }
+            }
+        };
+        
+        Box::new(result(Ok(snapshot)))
     }
 }
 
@@ -154,8 +227,7 @@ impl Handler<storage::InstallSnapshot<Error>> for AppStorage {
         _msg: storage::InstallSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        Box::new(result(Ok(())))
     }
 }
 
@@ -167,7 +239,6 @@ impl Handler<storage::GetCurrentSnapshot<Error>> for AppStorage {
         _msg: storage::GetCurrentSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        Box::new(result(Ok(None)))
     }
 }
