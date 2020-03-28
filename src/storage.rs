@@ -11,7 +11,9 @@ use actix_raft::storage;
 use actix_raft::storage::GetInitialState;
 use tokio::fs;
 
-pub struct AppStorage {}
+pub struct AppStorage {
+    logs: Vec<messages::Entry<Data>>,
+}
 
 impl Actor for AppStorage {
     type Context = Context<Self>;
@@ -57,8 +59,7 @@ impl Handler<storage::SaveHardState<Error>> for AppStorage {
         _msg: storage::SaveHardState<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        Box::new(result(Ok(())))
     }
 }
 
@@ -67,11 +68,16 @@ impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        _msg: storage::GetLogEntries<Data, Error>,
+        msg: storage::GetLogEntries<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        // ... snip ...
-        unimplemented!()
+        Box::new(result(Ok(self
+            .logs
+            .iter()
+            .skip(msg.start as usize)
+            .take(msg.stop as usize - msg.start as usize)
+            .cloned()
+            .collect())))
     }
 }
 
