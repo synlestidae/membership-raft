@@ -1,0 +1,1 @@
+https://docs.rs/actix-web/3.0.0-alpha.1/actix_web/struct.App.html

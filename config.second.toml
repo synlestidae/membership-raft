@@ -1,0 +1,9 @@
+[[bootstrap_nodes]] 
+id = 1 
+name = "main"
+address = "127.0.0.1"
+port = 5001
+
+[webserver]
+port = 5002
+name = "test-secondary"

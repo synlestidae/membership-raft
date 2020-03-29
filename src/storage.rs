@@ -8,18 +8,24 @@ use actix_raft::storage;
 use std::mem;
 use serde::{Serialize, Deserialize};
 use crate::shared_network_state::SharedNetworkState;
+use log::{debug, trace};
 
 #[derive(Serialize, Deserialize)]
 pub struct AppStorage {
-    //shared_network_state: SharedNetworkState,
+    shared_network_state: SharedNetworkState,
     snapshot_path: Option<String>,
     membership: messages::MembershipConfig,
     logs: Vec<messages::Entry<Data>>,
 }
 
 impl AppStorage {
-    pub fn new() -> Self {
-        unimplemented!()
+    pub fn new(shared_network_state: SharedNetworkState, membership: messages::MembershipConfig) -> Self {
+        Self {
+            shared_network_state,
+            snapshot_path: None,
+            membership,
+            logs: vec![]
+        }
     }
 
     fn upsert_entry(&mut self, entry: messages::Entry<Data>) -> Result<(), Error> {
@@ -39,12 +45,14 @@ impl AppStorage {
     }
 
     fn apply_to_state_machine(&mut self, data: Data) {
+        debug!("Received message: {:?}", data);
         match data {
             Data::AddNode { .. } => {}
         }
     }
 
     fn apply_entry_to_state_machine(&mut self, msg: messages::EntryPayload<Data>) {
+        trace!("Applying msg {:?}", msg);
         match msg {
             messages::EntryPayload::Blank => {}
             messages::EntryPayload::Normal(messages::EntryNormal { data }) => {
@@ -78,6 +86,9 @@ impl Handler<storage::GetInitialState<Error>> for AppStorage {
         _msg: storage::GetInitialState<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling GetInitialState");
+        debug!("Members in initial state: {:?}", self.membership);
+
         Box::new(result(Ok(storage::InitialState {
             last_log_index: 0,
             last_log_term: 0,
@@ -85,12 +96,7 @@ impl Handler<storage::GetInitialState<Error>> for AppStorage {
             hard_state: storage::HardState {
                 current_term: 0,
                 voted_for: None,
-                membership: messages::MembershipConfig {
-                    is_in_joint_consensus: false,
-                    members: vec![],
-                    non_voters: vec![],
-                    removing: vec![],
-                },
+                membership: self.membership.clone(),
             },
         })))
     }
@@ -104,6 +110,8 @@ impl Handler<storage::SaveHardState<Error>> for AppStorage {
         msg: storage::SaveHardState<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling SaveHardState");
+
         Box::new(result(Ok(())))
     }
 }
@@ -116,6 +124,8 @@ impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
         msg: storage::GetLogEntries<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling GetLogEntries");
+
         Box::new(result(Ok(self
             .logs
             .iter()
@@ -134,6 +144,8 @@ impl Handler<storage::AppendEntryToLog<Data, Error>> for AppStorage {
         msg: storage::AppendEntryToLog<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling AppendEntryToLog");
+
         let new_msg = (*msg.entry).clone();
 
         Box::new(result(self.upsert_entry(new_msg)))
@@ -148,6 +160,8 @@ impl Handler<storage::ReplicateToLog<Data, Error>> for AppStorage {
         msg: storage::ReplicateToLog<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling ReplicateToLog");
+
         for entry in (*msg.entries).clone().into_iter() {
             match self.upsert_entry(entry) {
                 Ok(_) => {}
@@ -167,6 +181,8 @@ impl Handler<storage::ApplyEntryToStateMachine<Data, DataResponse, Error>> for A
         msg: storage::ApplyEntryToStateMachine<Data, DataResponse, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling ApplyEntryToStateMachine");
+
         let payload = msg.payload.payload.clone();
 
         self.apply_entry_to_state_machine(payload);
@@ -183,6 +199,8 @@ impl Handler<storage::ReplicateToStateMachine<Data, Error>> for AppStorage {
         msg: storage::ReplicateToStateMachine<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling ReplicateToStateMachine");
+
         for e in msg.payload {
             self.apply_entry_to_state_machine(e.payload);
         }
@@ -200,6 +218,8 @@ impl Handler<storage::CreateSnapshot<Error>> for AppStorage {
         _msg: storage::CreateSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling CreateSnapshot");
+
         let snapshot_path = self.snapshot_path.clone();
         let latest_log = &self.logs[self.logs.len() - 1];
         let snapshot = storage::CurrentSnapshotData {
@@ -226,6 +246,8 @@ impl Handler<storage::InstallSnapshot<Error>> for AppStorage {
         msg: storage::InstallSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling InstallSnapshot");
+
         Box::new(result(Ok(())))
     }
 }
@@ -238,6 +260,8 @@ impl Handler<storage::GetCurrentSnapshot<Error>> for AppStorage {
         _msg: storage::GetCurrentSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        debug!("Handling GetCurrentSnapshot");
+
         Box::new(result(Ok(None)))
     }
 }

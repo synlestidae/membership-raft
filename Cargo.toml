@@ -14,10 +14,20 @@ bincode = "1.2.1"
 actix-web = "2.0.0"
 rocket_contrib = "*"
 rocket = "*"
+toml = "0.4.2"
+clap = { git = "https://github.com/clap-rs/clap/" }
+log = "0.4"
+simple_logger = "1.6.0"
+rand = "*"
+futures-util = "*"
 
 [dependencies.tokio]
 version = "0.2.13"
 features = ["fs"]
+
+[dependencies.reqwest]
+version = "*"
+features = ["blocking"]
 
 [[bin]]
 name = "test"

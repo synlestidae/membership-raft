@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppNode {
     pub id: u64,
     pub name: String,

@@ -1,10 +1,28 @@
 use crate::app_node::AppNode;
 use std::sync::Arc;
 use std::sync::Mutex;
+use serde::{Serialize, Serializer, Deserialize};
+use serde;
+use serde::de::Deserializer;
+use bincode;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SharedNetworkState {
+    #[serde(serialize_with = "nodes_serialize", deserialize_with = "nodes_deserialize")]
     nodes: Arc<Mutex<Vec<AppNode>>>
+}
+
+fn nodes_deserialize<'r, D: Deserializer<'r>>(deserializer: D) -> Result<Arc<Mutex<Vec<AppNode>>>, D::Error> {//<D: Deserializer>(derializer: D) -> Result<D::Ok, D::Error> {
+    //Ok(data)
+    let bytes: Vec<u8> = serde::de::Deserialize::deserialize(deserializer)?;
+    let array: Vec<AppNode> = bincode::deserialize(&bytes).map_err(serde::de::Error::custom)?;
+
+    Ok(Arc::new(Mutex::new(array)))
+}
+
+fn nodes_serialize<S: Serializer>(nodes: &Arc<Mutex<Vec<AppNode>>>, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bytes(&bincode::serialize(&*nodes.lock().unwrap()).unwrap())
+    //unimplemented!()
 }
 
 impl SharedNetworkState {
@@ -14,10 +32,10 @@ impl SharedNetworkState {
         }
     }
 
-    pub fn register_node(&mut self, id: u64, name: String, address: std::net::IpAddr, port: u16) {
+    pub fn register_node<S: ToString>(&mut self, id: u64, name: S, address: std::net::IpAddr, port: u16) {
         self.nodes.lock().unwrap().push(AppNode {
             id,
-            name,
+            name: name.to_string(),
             address,
             port
         });
