@@ -206,7 +206,7 @@ impl Handler<storage::ReplicateToStateMachine<Data, Error>> for AppStorage {
         }
 
         // ... snip ...
-        unimplemented!()
+        Box::new(result(Ok(())))
     }
 }
 
