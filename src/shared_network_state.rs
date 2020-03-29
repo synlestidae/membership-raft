@@ -32,8 +32,11 @@ impl SharedNetworkState {
         }
     }
 
-    pub fn register_node<S: ToString>(&mut self, id: u64, name: S, address: std::net::IpAddr, port: u16) {
-        self.nodes.lock().unwrap().push(AppNode {
+    pub fn register_node<S: ToString>(&self, id: u64, name: S, address: std::net::IpAddr, port: u16) {
+        let mut nodes = self.nodes.lock().unwrap();
+        nodes.retain(|n| n.id != id);
+
+        nodes.push(AppNode {
             id,
             name: name.to_string(),
             address,

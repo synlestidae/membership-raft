@@ -13,34 +13,42 @@ use actix_raft::NodeId;
 use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
 use std::io::Cursor;
+use std::fmt::Debug;
+use crate::config::WebserverConfig;
 
 
 /// Your application's network interface actor.
 pub struct AppNetwork {
     shared_network_state: SharedNetworkState,
-    node_id: NodeId
+    node_id: NodeId,
+    webserver: WebserverConfig
 }
 
 impl AppNetwork {
-    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId) -> Self {
+    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId, webserver: &WebserverConfig) -> Self {
         Self {
             shared_network_state,
-            node_id
+            node_id,
+            webserver: webserver.clone()
         }
     }
 
-    //fn post<'r, S: Serialize, A, R: Deserialize<'r>>(&self, node_id: NodeId, msg: S) -> ResponseActFuture<A, R, reqwest::Error> {
-    fn post<'r, S: Serialize, D: DeserializeOwned>(&mut self, node_id: NodeId, msg: S, path: &str) -> Result<D, reqwest::Error> {//ResponseActFuture<A, R, reqwest::Error> {
+    fn post<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> Result<D, reqwest::Error> {//ResponseActFuture<A, R, reqwest::Error> {
         let node_option = self.shared_network_state.get_node(node_id);
 
         match node_option {
             Some(node) => {
+                let uri = format!("http://{}:{}{}", node.address, node.port, path);
+                debug!("Sending msg to node {} at {}", node_id, uri); 
+                debug!("Serializing: {:?}", msg);
+
                 let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
                 let body: Body = body_bytes.into();
 
-                let responseResult = reqwest::blocking::Client::new().post(&format!("http://{}:{}{}", node.address, node.port, path))
+                let responseResult = reqwest::blocking::Client::new().post(&uri)
                     .header("User-Agent", "Membership-Raft")
                     .header("X-Node-Id", self.node_id)
+                    .header("X-Node-Port", self.webserver.port)
                     .body(body)
                     .send();
 
@@ -48,7 +56,9 @@ impl AppNetwork {
                     Ok(resp) => {
                         let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
                         debug!("Deserializing {} bytes from {}", bytes.len(), path);
+
                         let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
+                        debug!("Deserialized: {:?}", response);
 
                         Ok(response)
                     },
@@ -61,11 +71,14 @@ impl AppNetwork {
 
                 return res;
             },
-            None => unimplemented!() //return Box::new(result(Err(())))
+            None => {
+                error!("Failed to get node with id {}", node_id);
+                unimplemented!()
+            }
         }
     }
 
-    fn handle_http<S: Serialize, D: 'static + DeserializeOwned>(&mut self, node_id: NodeId, path: &str, msg: S) -> ResponseActFuture<Self, D, ()> {
+    fn handle_http<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, path: &str, msg: S) -> ResponseActFuture<Self, D, ()> {
         let node_option = self.shared_network_state.get_node(node_id);
 
         match node_option {
@@ -114,7 +127,6 @@ impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
                     Err(_) => Box::new(result(Err(())))
                 };
 
-                //return Box::new(result(Ok(response)));
             },
             None => return Box::new(result(Err(())))
         }

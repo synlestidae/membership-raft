@@ -134,6 +134,10 @@ fn main() {
     // formation chapter for more details.
     let mut members = vec![node_id];
 
+    for node in node_config.bootstrap_nodes.iter() {
+        members.push(node.id);
+    }
+
     let membership: messages::MembershipConfig = messages::MembershipConfig {
         is_in_joint_consensus: false,
         members: members.clone(),
@@ -146,7 +150,7 @@ fn main() {
     };
         
     // Start the various actor types and hold on to their addrs.
-    let network = network::AppNetwork::new(shared_network_state.clone(), node_id);
+    let network = network::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
     let storage = storage::AppStorage::new(shared_network_state, membership);
     let metrics = metrics::AppMetrics::new();
     let app_raft = AppRaft::new(node_id, config, network.start(), storage.start(), metrics.start().recipient());
@@ -158,7 +162,7 @@ fn main() {
     let mut webserver = webserver::WebServer::new(port, app_raft_address.clone());
 
     std::thread::spawn(move || {
-        const SECONDS_DELAY: u64 = 2;
+        const SECONDS_DELAY: u64 = 5;
 
         info!("Waiting for {} seconds before adding config", SECONDS_DELAY);
 
@@ -177,7 +181,7 @@ fn main() {
     let config_name = node_config.name;
 
     std::thread::spawn(move || {
-        const SECONDS_DELAY: u64 = 5;
+        const SECONDS_DELAY: u64 = 4;
 
         info!("Waiting for {} seconds before registering node message", SECONDS_DELAY);
 
@@ -185,14 +189,9 @@ fn main() {
 
         info!("Registering this node");
 
-        match app_raft_address2.try_send(messages::ClientPayload::new(messages::EntryNormal { data: Data::AddNode {
-            id: node_id,
-            name: config_name,
-            address: "127.0.0.1".parse().unwrap(),
-            port: port
-        } }, messages::ResponseMode::Applied)) {
-            Ok(()) => info!("Successfully sent message for Node"),
-            Err(err) => error!("Error sending Node message {:?}", err)
+        match app_raft_address2.try_send(admin::ProposeConfigChange::new(vec![node_id], vec![])) {
+            Ok(()) => info!("Successfully sent message to register Node"),
+            Err(err) => error!("Error sending register Node message {:?}", err)
         };
     });
 

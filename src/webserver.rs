@@ -33,7 +33,6 @@ use crate::Data;
 use crate::shared_network_state::SharedNetworkState;
 
 use rocket::Rocket;
-//use futures_util::FuturesExt;
 use actix::prelude::Future;
 use rocket;
 
@@ -69,6 +68,7 @@ pub type ResultResponse<T> = Result<Custom<Json<T>>, WebServerError>;
 #[derive(Clone)]
 struct PostHandler {
     addr: Addr<AppRaft>,
+    shared_network: SharedNetworkState,
 }
 
 fn serialize<S: Serialize>(s: S) -> Vec<u8> {
@@ -81,6 +81,21 @@ impl Handler for PostHandler {
     fn handle<'r>(&self, request: &'r Request, data: RocketData) -> Outcome<'r> {
         let mut buffer = Vec::new();
         data.open().read_to_end(&mut buffer);
+
+        let node_id = request.headers().get_one("x-node-id");
+        let node_port = request.headers().get_one("x-node-port");
+
+        match (request.remote(), node_id, node_port) {
+            (Some(ip), Some(ref id_string), Some(ref port_string)) => {
+                let node_id = id_string.parse::<u64>().unwrap();
+                let node_port = port_string.parse::<u16>().unwrap();
+
+                debug!("Register node {} with IP {} and port {}", node_id, ip, node_port);
+
+                self.shared_network.register_node(node_id, "remote-node", ip.ip(), ip.port());
+            },
+            result => debug!("Cannot get IP from request: {:?}", result)
+        };
 
         let result: Result<Vec<u8>, _> = match request.uri().path() {
             "/client/clientPayload" => self.handle_client_payload(buffer).map(serialize),
@@ -125,6 +140,8 @@ impl PostHandler {
             .send(messages::ClientPayload::new(messages::EntryNormal { data: payload.data }, messages::ResponseMode::Committed))
             .wait();
 
+        debug!("ClientPayloadResponse: {:?}", result);
+
         match result {
             Ok(Ok(result)) => Ok(result),
             Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
@@ -141,6 +158,8 @@ impl PostHandler {
 
         let result = self.addr.send(payload).wait();
 
+        debug!("AppendEntriesResponse: {:?}", result);
+
         match result {
             Ok(Ok(result)) => Ok(result),
             Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
@@ -149,9 +168,12 @@ impl PostHandler {
     }
 
     fn handle_vote_request(&self, data: Vec<u8>) -> Result<messages::VoteResponse, WebServerError> {
+        debug!("Handling a vote of {} bytes", data.len());
         let payload: messages::VoteRequest = bincode::deserialize(&data)?;
 
         let result = self.addr.send(payload).wait();
+
+        debug!("VoteResponse: {:?}", result);
 
         match result {
             Ok(Ok(result)) => Ok(result),
@@ -164,6 +186,8 @@ impl PostHandler {
         let payload: messages::InstallSnapshotRequest = bincode::deserialize(&data)?;
 
         let result = self.addr.send(payload).wait();
+
+        debug!("InstallSnapshotResponse: {:?}", result);
 
         match result {
             Ok(Ok(result)) => Ok(result),
@@ -189,7 +213,8 @@ impl WebServer {
 
     pub fn start(&mut self) {
         let post_handler = PostHandler {
-            addr: self.addr.clone()
+            addr: self.addr.clone(),
+            shared_network: self.shared_network.clone()
         };
 
         let post_client_payload_route = Route::new(Method::Post, "/client/clientPayload", post_handler.clone());
