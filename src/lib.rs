@@ -12,6 +12,8 @@ extern crate simple_logger;
 extern crate rand;
 extern crate futures_util;
 extern crate reqwest;
+extern crate futures;
+extern crate tarpc;
 
 use actix_raft::Raft;
 
@@ -29,6 +31,8 @@ mod client_payload;
 mod metrics;
 mod app_state;
 mod config;
+mod rpc;
+mod server;
 
 /// The application's data type.
 ///
