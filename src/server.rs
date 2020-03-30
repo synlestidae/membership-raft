@@ -26,11 +26,13 @@ impl futures::future::Future for RpcFuture {
     type Output = Result<messages::AppendEntriesResponse, ()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut futures::task::Context) -> futures::task::Poll<Self::Output> {
-        match ActixFuture::poll(&mut self.request) {
-            Ok(FuturesPoll::Pending) => std::task::Poll::Pending,
-            Ok(FuturesPoll::Ready(r)) => std::task::Poll::Ready(r),
-            Err(err) => unimplemented!()
-        }
+        //match ActixFuture::poll(&mut self.request) {
+            //Ok(FuturesPoll::Pending) => std::task::Poll::Pending,
+            //Ok(FuturesPoll::Ready(r)) => std::task::Poll::Ready(r),
+        //    Err(err) => unimplemented!(),
+        //    _ => unimplemented!(),
+        //}
+        unimplemented!()
 
         //self.request.poll()
         //unimplemented!()
