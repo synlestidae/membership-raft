@@ -12,20 +12,33 @@ struct Server {
     addr: Addr<AppRaft>
 }
 
-struct RpcFuture<R, E> { 
-    future: Box<dyn Future<Output=std::result::Result<R, E>>>
+struct RpcFuture { 
+    //future: Box<dyn Future<Output=std::result::Result<R, E>>>
+    request: Request<crate::AppRaft, messages::AppendEntriesRequest<Data>>//messages::AppendEntriesRequest<Data>>
 }
 
-impl<R, E> futures::future::Future for RpcFuture<R, E> { 
-    type Output = Result<R, E>;
+use crate::actix::prelude::Future as ActixFuture;
+
+//use futures::Async as FuturesAsync;
+use futures::task::Poll as FuturesPoll;
+
+impl futures::future::Future for RpcFuture { 
+    type Output = Result<messages::AppendEntriesResponse, ()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut futures::task::Context) -> futures::task::Poll<Self::Output> {
-        unimplemented!()
+        match ActixFuture::poll(&mut self.request) {
+            Ok(FuturesPoll::Pending) => std::task::Poll::Pending,
+            Ok(FuturesPoll::Ready(r)) => std::task::Poll::Ready(r),
+            Err(err) => unimplemented!()
+        }
+
+        //self.request.poll()
+        //unimplemented!()
     }
 }
 
 impl Rpc for Server {
-    type SendClientPayloadFut = Request<crate::AppRaft, messages::AppendEntriesRequest<Data>>; //RpcFuture<>;
+    type SendClientPayloadFut = RpcFuture;//<messages::AppendEntriesRequest<Data>>  //Request<crate::AppRaft, >; //RpcFuture<>;
 
     fn send_client_payload(self, _: tarpc::context::Context,msg: messages::AppendEntriesRequest<Data>) -> Self::SendClientPayloadFut {
         unimplemented!()
