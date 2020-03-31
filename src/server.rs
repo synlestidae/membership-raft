@@ -30,12 +30,7 @@ impl<A, M: Message + std::marker::Send> std::future::Future for RpcFuture<A, M> 
     type Output = M::Result;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, _context: &mut std::task::Context<'_>) -> std::task::Poll<M::Result> {
-        let this = &mut self;
-        match ActixFuture::poll(&mut this.request) {
-            Ok(Async::NotReady) => std::task::Poll::Pending,//Poll::Ready(obj), //Ok(obj),
-            Ok(Async::Ready(val)) => std::task::Poll::Ready(val),//Poll::Ready(obj), //Ok(obj),
-            Err(err) => unimplemented!() //std::task::Poll::Ready(err)
-        }
+        unimplemented!()
     }
 }
 
@@ -43,7 +38,6 @@ impl Rpc for Server {
     type SendClientPayloadFut = RpcFuture<AppRaft, messages::AppendEntriesRequest<Data>>;
 
     fn send_client_payload(self, _: tarpc::context::Context, msg: messages::AppendEntriesRequest<Data>) -> Self::SendClientPayloadFut {
-        self.addr.send(msg);
-        unimplemented!()
+        RpcFuture { request: self.addr.send(msg) }
     }
 }

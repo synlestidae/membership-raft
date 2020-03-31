@@ -1,40 +1,30 @@
-use rocket_contrib::json::Json;
-use rocket::response;
-use rocket::response::Responder;
-use serde::{Serialize, Deserialize};
-use serde::de::DeserializeOwned;
-use rocket::response::status::Custom;
-use rocket::config::{Config, ConfigBuilder, Environment};
-use rocket::request::FromRequest;
-use rocket::handler::Outcome;
-use rocket::Request;
-use rocket::http::Status;
-use rocket::http::Cookies;
-use rocket::http::Cookie;
-use crate::AppRaft;
 use actix::Addr;
-use crate::client_payload::ClientPayload;
-use rocket::data::DataStream;
-use rocket::Data as RocketData;
-use std::io::Read;
-use std::marker::PhantomData;
-use rocket::Handler;
-use bincode;
-use std::convert::From;
-use actix_raft::messages;
-
-use rocket::Route;
-use rocket::http::Method;
-use rocket::Response;
-use rocket::http::ContentType;
-
-use crate::Data;
-
-use crate::shared_network_state::SharedNetworkState;
-
-use rocket::Rocket;
 use actix::prelude::Future;
+use actix_raft::messages;
+use bincode;
+use crate::AppRaft;
+use crate::Data;
+use crate::client_payload::ClientPayload;
+use crate::create_session_request::{CreateSessionRequest, CreateSessionResponse};
+use crate::shared_network_state::SharedNetworkState;
+use rocket::Data as RocketData;
+use rocket::Handler;
+use rocket::Request;
+use rocket::Response;
+use rocket::Route;
+use rocket::config::{Config, ConfigBuilder, Environment};
+use rocket::handler::Outcome;
+use rocket::http::ContentType;
+use rocket::http::Method;
+use rocket::http::Status;
+use rocket::response::Responder;
+use rocket::response::status::Custom;
+use rocket::response;
 use rocket;
+use rocket_contrib::json::Json;
+use serde::{Serialize};
+use std::convert::From;
+use std::io::Read;
 
 pub struct WebServer {
     port: u16,
@@ -44,8 +34,8 @@ pub struct WebServer {
 }
 
 pub struct WebServerError {
-   error_message: String,
-   status_code: u16
+   pub error_message: String,
+   pub status_code: u16
 }
 
 impl From<Box<bincode::ErrorKind>> for WebServerError {
@@ -98,6 +88,7 @@ impl Handler for PostHandler {
         };
 
         let result: Result<Vec<u8>, _> = match request.uri().path() {
+            "/client/createSessionRequest" => self.handle_create_session_request(buffer).map(serialize),
             "/client/clientPayload" => self.handle_client_payload(buffer).map(serialize),
             "/rpc/appendEntriesRequest" => self.handle_append_entries(buffer).map(serialize),
             "/rpc/voteRequest" => self.handle_vote_request(buffer).map(serialize),
@@ -131,6 +122,7 @@ impl From<actix::MailboxError> for WebServerError {
 }
 
 use log::{debug, error};
+use actix_raft::admin;
 
 impl PostHandler {
     fn handle_client_payload(&self, data: Vec<u8>) -> Result<messages::ClientPayloadResponse<crate::DataResponse>, WebServerError> {
@@ -195,6 +187,50 @@ impl PostHandler {
             Err(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
         }
     }
+
+    fn handle_create_session_request(&self, data: Vec<u8>) -> Result<crate::create_session_request::CreateSessionResponse, WebServerError> {
+        let mut shared_network = self.shared_network.clone();
+        let request: CreateSessionRequest = bincode::deserialize(&data)?;
+
+        let new_node = request.new_node;
+
+        let entry = messages::EntryNormal { 
+            data: Data::AddNode { 
+                id: new_node.id,
+                name: new_node.name,
+                address: new_node.address,
+                port: new_node.port 
+            } 
+        };
+
+        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
+
+        self.addr.send(payload).wait()?;
+
+        match self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])).wait()? {
+            Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
+                let leader_node_option = shared_network.get_node(node_id);
+
+                if let Some(leader_node) = leader_node_option {
+                    Ok(CreateSessionResponse::RedirectToLeader {
+                        leader_node 
+                    })
+                } else {
+                    Ok(CreateSessionResponse::Error)
+                }
+            },
+            Err(admin::ProposeConfigChangeError::NodeNotLeader(None)) => {
+                error!("Error with creating session: NO LEADER!");
+
+                Ok(CreateSessionResponse::Error)
+            },
+            Ok(_) => Ok(CreateSessionResponse::Success),
+            Err(err) => { 
+                error!("Error with creating session: {:?}", err);
+                Ok(CreateSessionResponse::Error)
+            },
+        }
+    }
 }
 
 impl WebServer {
@@ -220,13 +256,15 @@ impl WebServer {
         let post_client_payload_route = Route::new(Method::Post, "/client/clientPayload", post_handler.clone());
         let append_entries_route = Route::new(Method::Post, "/rpc/appendEntriesRequest", post_handler.clone());
         let vote_request_route = Route::new(Method::Post, "/rpc/voteRequest", post_handler.clone());
-        let install_snapshot_route = Route::new(Method::Post, "/rpc/installSnapshotRequest", post_handler);
+        let install_snapshot_route = Route::new(Method::Post, "/rpc/installSnapshotRequest", post_handler.clone());
+        let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler);
 
         let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![
             post_client_payload_route,
             append_entries_route,
             vote_request_route,
-            install_snapshot_route 
+            install_snapshot_route,
+            create_session_request 
         ]);
 
         rocket.launch();

@@ -33,6 +33,7 @@ mod app_state;
 mod config;
 mod rpc;
 mod server;
+mod create_session_request;
 
 /// The application's data type.
 ///
@@ -41,7 +42,7 @@ mod server;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Data {
     // Your data variants go here.
-    AddNode { id: u64, name: String, address: std::net::IpAddr, port: u16 }
+    AddNode { id: u64, name: String, address: std::net::IpAddr, port: u16 },
 }
 
 /// The application's data response types.
@@ -83,7 +84,7 @@ use clap::Clap;
 
 /// This doc string acts as a help message when the user runs '--help'
 /// as do all doc strings on fields
-#[derive(Clap)]
+#[derive(Clap, Debug)]
 #[clap(version = "0.1", author = "Mate Antunovic")]
 struct Opts {
     #[clap(short = "c", long = "config")]
@@ -93,11 +94,14 @@ struct Opts {
     pub node_id: Option<u64>,
 }
 
-use log::{info, error};
+use log::{info, error, debug};
 
 fn main() {
     simple_logger::init().unwrap();
     let opts: Opts = Opts::parse();
+
+    info!("Opts: {:?}", opts);
+
     let node_config: config::Config = match opts.config { 
         Some(config_path) => {
             info!("Loading config from {}", config_path);
@@ -110,6 +114,8 @@ fn main() {
             Default::default()
         }
     };
+
+    info!("Node config: {:?}", node_config);
 
     let mut shared_network_state = shared_network_state::SharedNetworkState::new();
 
@@ -152,14 +158,18 @@ fn main() {
     let init_with_config = admin::InitWithConfig {
         members: node_config.bootstrap_nodes.iter().map(|n| n.id).collect()
     };
-        
+
     // Start the various actor types and hold on to their addrs.
     let network = network::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
     let storage = storage::AppStorage::new(shared_network_state, membership);
     let metrics = metrics::AppMetrics::new();
-    let app_raft = AppRaft::new(node_id, config, network.start(), storage.start(), metrics.start().recipient());
+
+    let network_addr = network.start();
+
+    let app_raft = AppRaft::new(node_id, config, network_addr.clone(), storage.start(), metrics.start().recipient());
 
     let app_raft_address = app_raft.start();
+
     let app_raft_address2 = app_raft_address.clone();
     let port = node_config.webserver.port;
 
@@ -184,6 +194,12 @@ fn main() {
 
     let config_name = node_config.name;
 
+    info!("Server will run on port {}", node_config.webserver.port);
+
+    let needs_to_join = !node_config.node_id.is_some();
+
+    let bootstrap_nodes = node_config.bootstrap_nodes.clone(); // [0].clone();
+
     std::thread::spawn(move || {
         const SECONDS_DELAY: u64 = 4;
 
@@ -191,15 +207,33 @@ fn main() {
 
         std::thread::sleep(std::time::Duration::new(SECONDS_DELAY, 0));
 
-        info!("Registering this node");
+        info!("Registering this node: {}", needs_to_join);
+
+        if needs_to_join {
+            debug!("Attempting to join cluster");
+            use crate::futures::Future;
+
+            let response_result = network_addr.send(crate::create_session_request::CreateSessionRequest { 
+                new_node: crate::app_node::AppNode {
+                    id: node_id,
+                    address: "127.0.0.1".parse().unwrap(),
+                    name: String::from("test-node"),
+                    port
+                },
+                dest_node: bootstrap_nodes[0].clone(),
+                //node_id: bootstrap_nodes[0].id 
+            }).wait();
+
+            info!("Response result: {:?}", response_result);
+
+        //info!("Info: {:?}", response);
+        }
 
         match app_raft_address2.try_send(admin::ProposeConfigChange::new(vec![node_id], vec![])) {
             Ok(()) => info!("Successfully sent message to register Node"),
             Err(err) => error!("Error sending register Node message {:?}", err)
         };
     });
-
-    info!("Server will run on port {}", node_config.webserver.port);
 
     // Run the actix system. Unix signals for termination &
     // graceful shutdown are automatically handled.

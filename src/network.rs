@@ -5,16 +5,16 @@ use actix_raft::messages::InstallSnapshotResponse;
 use actix_raft::messages::VoteRequest;
 use actix_raft::messages::VoteResponse;
 use actix_raft::{messages, RaftNetwork};
-use std::net::IpAddr;
 use crate::shared_network_state::SharedNetworkState;
 use actix::fut::result;
 use log::{debug, error};
 use actix_raft::NodeId;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize};
 use serde::de::DeserializeOwned;
 use std::io::Cursor;
 use std::fmt::Debug;
 use crate::config::WebserverConfig;
+use crate::create_session_request::*;
 
 
 /// Your application's network interface actor.
@@ -30,6 +30,39 @@ impl AppNetwork {
             shared_network_state,
             node_id,
             webserver: webserver.clone()
+        }
+    }
+
+    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: &str, msg: S) -> Result<D, reqwest::Error> {
+        //let uri = format!("http://{}:{}{}", node.address, node.port, path);
+        debug!("POST to {}", uri); 
+        debug!("Serializing: {:?}", msg);
+
+        let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
+        let body: Body = body_bytes.into();
+
+        let responseResult = reqwest::blocking::Client::new().post(uri)
+            .header("User-Agent", "Membership-Raft")
+            //.header("X-Node-Id", self.node_id)
+            //.header("X-Node-Port", self.webserver.port)
+            .body(body)
+            .send();
+
+        match responseResult {
+            Ok(resp) => {
+                let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
+                debug!("Deserializing {} bytes from {}", bytes.len(), uri);
+
+                let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
+                debug!("Deserialized: {:?}", response);
+
+                Ok(response)
+            },
+            Err(err) => {
+                error!("Error in response: {:?}", err);
+
+                Err(err)
+            }
         }
     }
 
@@ -157,6 +190,22 @@ impl Handler<VoteRequest> for AppNetwork {
         debug!("Handling VoteRequest: {:?}", msg);
 
         self.handle_http(msg.target, "/rpc/voteRequest", msg)
+    }
+}
+
+impl Handler<CreateSessionRequest> for AppNetwork {
+    type Result = ResponseActFuture<Self, CreateSessionResponse, ()>;
+
+    fn handle(&mut self, msg: CreateSessionRequest, _ctx: &mut Self::Context) -> Self::Result {
+        debug!("Handling CreateSessionRequest: {:?}", msg);
+
+        match self.post_to_uri(&format!("http://{}:{}/client/createSessionRequest", msg.dest_node.address, msg.dest_node.port), msg) {
+            Ok(resp) => Box::new(result(Ok(resp))),
+            Err(err) => { 
+                error!("Error making session request: {:?}", err);
+                Box::new(result(Err(())))
+            }
+        }
     }
 }
 
