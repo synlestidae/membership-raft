@@ -21,27 +21,19 @@ struct RpcFuture {
 use actix::prelude::Future as ActixFuture;
 
 use futures::Poll;
+use futures::Async;
 
-impl futures::future::Future for RpcFuture { 
-    type Item = Result<messages::AppendEntriesResponse, ()>;
+use std::task::Context;
 
-    type Error = ();
+impl std::future::Future for RpcFuture { 
+    type Output = Result<messages::AppendEntriesResponse, ()>;
 
-    fn poll(self: Pin<&mut Self>) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: std::pin::Pin<&mut Self>, _context: &mut std::task::Context<'_>) -> std::task::Poll<std::result::Result<actix_raft::messages::AppendEntriesResponse, ()>> {
         match ActixFuture::poll(&mut self.request) {
-            Ok(Poll::Pending) => Poll::Pending,//Poll::Ready(obj), //Ok(obj),
-            Err(_) => Poll::Ready(Err(()))
+            Ok(Async::NotReady) => std::task::Poll::Pending,//Poll::Ready(obj), //Ok(obj),
+            Ok(Async::Ready(val)) => std::task::Poll::Ready(val),//Poll::Ready(obj), //Ok(obj),
+            Err(err) => std::task::Poll::Ready(Err(()))
         }
-        //match ActixFuture::poll(&mut self.request) {
-            //Ok(FuturesPoll::Pending) => std::task::Poll::Pending,
-            //Ok(FuturesPoll::Ready(r)) => std::task::Poll::Ready(r),
-        //    Err(err) => unimplemented!(),
-        //    _ => unimplemented!(),
-        //}
-        //unimplemented!()
-
-        //self.request.poll()
-        //unimplemented!()
     }
 }
 
