@@ -19,7 +19,7 @@ clap = { git = "https://github.com/clap-rs/clap/" }
 log = "0.4"
 simple_logger = "1.6.0"
 rand = "*"
-futures = "0.3"
+futures = "0.1.27"
 futures-util = "*"
 tarpc = "0.20.0"
 

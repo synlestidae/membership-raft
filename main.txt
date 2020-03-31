@@ -1,0 +1,14 @@
+2020-03-29 19:42:16,012 INFO  [test] Loading config from config.main.toml
+2020-03-29 19:42:16,012 TRACE [mio::poll] registering with poller
+2020-03-29 19:42:16,013 INFO  [test] This node's ID is 1
+2020-03-29 19:42:16,013 INFO  [test] Server will run on port 5001
+2020-03-29 19:42:16,013 INFO  [test] Waiting for 5 seconds before adding config
+2020-03-29 19:42:16,013 TRACE [tokio_reactor] event Readable Token(4194303)
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] loop process - 1 events, 0.000s
+2020-03-29 19:42:16,014 DEBUG [test::storage] Handling GetInitialState
+2020-03-29 19:42:16,014 DEBUG [test::storage] Members in initial state: MembershipConfig { is_in_joint_consensus: false, members: [1], non_voters: [], removing: [] }
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] event Readable Token(4194303)
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] loop process - 1 events, 0.000s
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] event Readable Token(4194303)
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] loop process - 1 events, 0.000s
+2020-03-29 19:42:16,014 TRACE [tokio_reactor] loop process - 0 events, 0.000s

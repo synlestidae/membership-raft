@@ -17,22 +17,28 @@ struct RpcFuture {
     request: Request<crate::AppRaft, messages::AppendEntriesRequest<Data>>//messages::AppendEntriesRequest<Data>>
 }
 
-use crate::actix::prelude::Future as ActixFuture;
-
 //use futures::Async as FuturesAsync;
-use futures::task::Poll as FuturesPoll;
+use actix::prelude::Future as ActixFuture;
+
+use futures::Poll;
 
 impl futures::future::Future for RpcFuture { 
-    type Output = Result<messages::AppendEntriesResponse, ()>;
+    type Item = Result<messages::AppendEntriesResponse, ()>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut futures::task::Context) -> futures::task::Poll<Self::Output> {
+    type Error = ();
+
+    fn poll(self: Pin<&mut Self>) -> Poll<Self::Item, Self::Error> {
+        match ActixFuture::poll(&mut self.request) {
+            Ok(Poll::Pending) => Poll::Pending,//Poll::Ready(obj), //Ok(obj),
+            Err(_) => Poll::Ready(Err(()))
+        }
         //match ActixFuture::poll(&mut self.request) {
             //Ok(FuturesPoll::Pending) => std::task::Poll::Pending,
             //Ok(FuturesPoll::Ready(r)) => std::task::Poll::Ready(r),
         //    Err(err) => unimplemented!(),
         //    _ => unimplemented!(),
         //}
-        unimplemented!()
+        //unimplemented!()
 
         //self.request.poll()
         //unimplemented!()
