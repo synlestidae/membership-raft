@@ -33,39 +33,6 @@ impl AppNetwork {
         }
     }
 
-    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: &str, msg: S) -> Result<D, reqwest::Error> {
-        //let uri = format!("http://{}:{}{}", node.address, node.port, path);
-        debug!("POST to {}", uri); 
-        debug!("Serializing: {:?}", msg);
-
-        let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
-        let body: Body = body_bytes.into();
-
-        let responseResult = reqwest::blocking::Client::new().post(uri)
-            .header("User-Agent", "Membership-Raft")
-            //.header("X-Node-Id", self.node_id)
-            //.header("X-Node-Port", self.webserver.port)
-            .body(body)
-            .send();
-
-        match responseResult {
-            Ok(resp) => {
-                let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
-                debug!("Deserializing {} bytes from {}", bytes.len(), uri);
-
-                let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
-                debug!("Deserialized: {:?}", response);
-
-                Ok(response)
-            },
-            Err(err) => {
-                error!("Error in response: {:?}", err);
-
-                Err(err)
-            }
-        }
-    }
-
     fn post<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> Result<D, reqwest::Error> {//ResponseActFuture<A, R, reqwest::Error> {
         let node_option = self.shared_network_state.get_node(node_id);
 
@@ -193,20 +160,56 @@ impl Handler<VoteRequest> for AppNetwork {
     }
 }
 
-impl Handler<CreateSessionRequest> for AppNetwork {
-    type Result = ResponseActFuture<Self, CreateSessionResponse, ()>;
+pub struct AdminNetwork { }
 
-    fn handle(&mut self, msg: CreateSessionRequest, _ctx: &mut Self::Context) -> Self::Result {
+impl Actor for AdminNetwork {
+    type Context = Context<Self>;
+}
+
+impl AdminNetwork {
+    pub fn session_request(&mut self, msg: CreateSessionRequest) -> Result<CreateSessionResponse, ()> {
         debug!("Handling CreateSessionRequest: {:?}", msg);
 
         match self.post_to_uri(&format!("http://{}:{}/client/createSessionRequest", msg.dest_node.address, msg.dest_node.port), msg) {
-            Ok(resp) => Box::new(result(Ok(resp))),
+            Ok(resp) => Ok(resp),
             Err(err) => { 
                 error!("Error making session request: {:?}", err);
-                Box::new(result(Err(())))
+                Err(())
+            }
+        }
+    }
+
+    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: &str, msg: S) -> Result<D, reqwest::Error> {
+        //let uri = format!("http://{}:{}{}", node.address, node.port, path);
+        debug!("POST to {}", uri); 
+        debug!("Serializing: {:?}", msg);
+
+        let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
+        let body: Body = body_bytes.into();
+
+        let responseResult = reqwest::blocking::Client::new().post(uri)
+            .header("User-Agent", "Membership-Raft")
+            //.header("X-Node-Id", self.node_id)
+            //.header("X-Node-Port", self.webserver.port)
+            .body(body)
+            .send();
+
+        match responseResult {
+            Ok(resp) => {
+                let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
+                debug!("Deserializing {} bytes from {}", bytes.len(), uri);
+
+                let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
+                debug!("Deserialized: {:?}", response);
+
+                Ok(response)
+            },
+            Err(err) => {
+                error!("Error in response: {:?}", err);
+
+                Err(err)
             }
         }
     }
 }
-
 

@@ -169,7 +169,7 @@ fn main() {
 
     let membership: messages::MembershipConfig = messages::MembershipConfig {
         is_in_joint_consensus: false,
-        members: members.clone(),
+        members: vec![node_id],
         non_voters: vec![],
         removing: vec![],
     };
@@ -188,7 +188,6 @@ fn main() {
     let app_raft = AppRaft::new(node_id, config, network_addr.clone(), storage.start(), metrics.start().recipient());
 
     let app_raft_address = app_raft.start();
-    let app_raft_address2 = app_raft_address.clone();
 
     let port = node_config.webserver.port;
 
@@ -196,16 +195,40 @@ fn main() {
 
     let needs_to_join = !node_config.node_id.is_some();
 
+    let mut admin_network = network::AdminNetwork { };
+
+    let bootstrap_nodes = node_config.bootstrap_nodes.clone();
+
+    if needs_to_join {
+        let response_result = admin_network.session_request(crate::create_session_request::CreateSessionRequest { 
+            new_node: crate::app_node::AppNode {
+                id: node_id,
+                address: "127.0.0.1".parse().unwrap(),
+                name: String::from("test-node"),
+                port
+            },
+            dest_node: bootstrap_nodes[0].clone(),
+        }).unwrap();
+
+        info!("Response result: {:?}", response_result);
+    }
+
     std::thread::spawn(move || webserver.start());
 
     std::thread::spawn(move || {
-        use crate::futures::Future;
-
-        const SECONDS_DELAY: u64 = 5;
+        const SECONDS_DELAY: u64 = 1;
 
         info!("Waiting for {} before setting up config", SECONDS_DELAY);
 
         std::thread::sleep(std::time::Duration::new(SECONDS_DELAY, 0));
+
+        info!("Initialising other members: {:?}", init_with_config.members);
+
+        match app_raft_address.send(init_with_config).wait() {
+            Ok(r) => info!("Successfully added config: {:?}", r),
+            Err(err) => error!("Error adding config: {:?}", err)
+        };
+
 
         if needs_to_join {
             info!("Joining existing cluster")
@@ -213,40 +236,21 @@ fn main() {
             info!("Starting cluster")
         }
 
-        if !needs_to_join {
-            info!("Adding config");
-
-            match app_raft_address.send(init_with_config).wait() {
-                Ok(r) => info!("Successfully added config: {:?}", r),
-                Err(err) => error!("Error adding config: {:?}", err)
-            };
-        } else {
+        if needs_to_join {
             info!("Server will run on port {}", node_config.webserver.port);
-
-            let bootstrap_nodes = node_config.bootstrap_nodes.clone();
 
             info!("Registering this node: {}", needs_to_join);
 
             debug!("Attempting to join cluster");
-            use crate::futures::Future;
-
-            let response_result = network_addr.send(crate::create_session_request::CreateSessionRequest { 
-                new_node: crate::app_node::AppNode {
-                    id: node_id,
-                    address: "127.0.0.1".parse().unwrap(),
-                    name: String::from("test-node"),
-                    port
-                },
-                dest_node: bootstrap_nodes[0].clone(),
-            }).wait();
-
-            info!("Response result: {:?}", response_result);
 
             let bootstrap_node = bootstrap_nodes[0].clone();
 
             shared_network_state.register_node(bootstrap_node.id, bootstrap_node.name, bootstrap_node.address, bootstrap_node.port);
         }
     });
+
+
+    use crate::futures::Future;
 
     // Run the actix system. Unix signals for termination &
     // graceful shutdown are automatically handled.
