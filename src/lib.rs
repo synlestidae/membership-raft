@@ -95,6 +95,25 @@ struct Opts {
 }
 
 use log::{info, error, debug};
+use actix::Context;
+use actix::Handler;
+
+/// Your application's metrics interface actor.
+struct AppMetrics {/* ... snip ... */}
+
+impl Actor for AppMetrics {
+    type Context = Context<Self>;
+
+    // ... snip ... other actix methods can be implemented here as needed.
+}
+
+impl Handler<actix_raft::RaftMetrics> for AppMetrics {
+    type Result = ();
+
+    fn handle(&mut self, msg: actix_raft::RaftMetrics, _ctx: &mut Context<Self>) -> Self::Result {
+        debug!("Metrics: {:?}", msg)
+    }
+}
 
 fn main() {
     simple_logger::init().unwrap();
@@ -161,55 +180,53 @@ fn main() {
 
     // Start the various actor types and hold on to their addrs.
     let network = network::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
-    let storage = storage::AppStorage::new(shared_network_state, membership);
-    let metrics = metrics::AppMetrics::new();
+    let storage = storage::AppStorage::new(shared_network_state.clone(), membership);
+    let metrics = AppMetrics {};
 
     let network_addr = network.start();
 
     let app_raft = AppRaft::new(node_id, config, network_addr.clone(), storage.start(), metrics.start().recipient());
 
     let app_raft_address = app_raft.start();
-
     let app_raft_address2 = app_raft_address.clone();
+
     let port = node_config.webserver.port;
 
     let mut webserver = webserver::WebServer::new(port, app_raft_address.clone());
 
-    std::thread::spawn(move || {
-        const SECONDS_DELAY: u64 = 5;
-
-        info!("Waiting for {} seconds before adding config", SECONDS_DELAY);
-
-        std::thread::sleep(std::time::Duration::new(SECONDS_DELAY, 0));
-
-        info!("Adding config");
-
-        match app_raft_address.try_send(init_with_config) {
-            Ok(()) => info!("Successfully added config"),
-            Err(err) => error!("Error adding config: {:?}", err)
-        };
-
-        webserver.start();
-    });
-
-    let config_name = node_config.name;
-
-    info!("Server will run on port {}", node_config.webserver.port);
-
     let needs_to_join = !node_config.node_id.is_some();
 
-    let bootstrap_nodes = node_config.bootstrap_nodes.clone(); // [0].clone();
+    std::thread::spawn(move || webserver.start());
 
     std::thread::spawn(move || {
-        const SECONDS_DELAY: u64 = 4;
+        use crate::futures::Future;
 
-        info!("Waiting for {} seconds before registering node message", SECONDS_DELAY);
+        const SECONDS_DELAY: u64 = 5;
+
+        info!("Waiting for {} before setting up config", SECONDS_DELAY);
 
         std::thread::sleep(std::time::Duration::new(SECONDS_DELAY, 0));
 
-        info!("Registering this node: {}", needs_to_join);
-
         if needs_to_join {
+            info!("Joining existing cluster")
+        } else {
+            info!("Starting cluster")
+        }
+
+        if !needs_to_join {
+            info!("Adding config");
+
+            match app_raft_address.send(init_with_config).wait() {
+                Ok(r) => info!("Successfully added config: {:?}", r),
+                Err(err) => error!("Error adding config: {:?}", err)
+            };
+        } else {
+            info!("Server will run on port {}", node_config.webserver.port);
+
+            let bootstrap_nodes = node_config.bootstrap_nodes.clone();
+
+            info!("Registering this node: {}", needs_to_join);
+
             debug!("Attempting to join cluster");
             use crate::futures::Future;
 
@@ -221,22 +238,17 @@ fn main() {
                     port
                 },
                 dest_node: bootstrap_nodes[0].clone(),
-                //node_id: bootstrap_nodes[0].id 
             }).wait();
 
             info!("Response result: {:?}", response_result);
 
-        //info!("Info: {:?}", response);
-        }
+            let bootstrap_node = bootstrap_nodes[0].clone();
 
-        match app_raft_address2.try_send(admin::ProposeConfigChange::new(vec![node_id], vec![])) {
-            Ok(()) => info!("Successfully sent message to register Node"),
-            Err(err) => error!("Error sending register Node message {:?}", err)
-        };
+            shared_network_state.register_node(bootstrap_node.id, bootstrap_node.name, bootstrap_node.address, bootstrap_node.port);
+        }
     });
 
     // Run the actix system. Unix signals for termination &
     // graceful shutdown are automatically handled.
     let _ = sys.run();
 }
-

@@ -113,6 +113,7 @@ impl Handler for PostHandler {
             Err(error) => Outcome::Failure(Status::InternalServerError)
         }
     }
+
 }
 
 impl From<actix::MailboxError> for WebServerError {
@@ -169,8 +170,16 @@ impl PostHandler {
 
         match result {
             Ok(Ok(result)) => Ok(result),
-            Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
-            Err(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
+            Ok(err) => {
+                debug!("VoteResponse error: {:?}", err);
+
+                Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
+            },
+            Err(err) => { 
+                debug!("VoteResponse error: {:?}", err);
+
+                Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
+            }
         }
     }
 
@@ -205,7 +214,13 @@ impl PostHandler {
 
         let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
 
-        self.addr.send(payload).wait()?;
+        match self.addr.send(payload).wait()? {
+            Ok(_) => {},
+            Err(err) => {
+                error!("Error sending ClientPayload: {:?}", err);
+                return Ok(CreateSessionResponse::Error);
+            }
+        }
 
         match self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])).wait()? {
             Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
@@ -257,14 +272,16 @@ impl WebServer {
         let append_entries_route = Route::new(Method::Post, "/rpc/appendEntriesRequest", post_handler.clone());
         let vote_request_route = Route::new(Method::Post, "/rpc/voteRequest", post_handler.clone());
         let install_snapshot_route = Route::new(Method::Post, "/rpc/installSnapshotRequest", post_handler.clone());
-        let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler);
+        let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler.clone());
+        let admin_metrics = Route::new(Method::Post, "/admin/metrics", post_handler);
 
         let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![
             post_client_payload_route,
             append_entries_route,
             vote_request_route,
             install_snapshot_route,
-            create_session_request 
+            create_session_request,
+            admin_metrics 
         ]);
 
         rocket.launch();
