@@ -169,7 +169,7 @@ fn main() {
 
     let membership: messages::MembershipConfig = messages::MembershipConfig {
         is_in_joint_consensus: false,
-        members: vec![node_id],
+        members: members.clone(),
         non_voters: vec![],
         removing: vec![],
     };
@@ -200,6 +200,10 @@ fn main() {
     let bootstrap_nodes = node_config.bootstrap_nodes.clone();
 
     if needs_to_join {
+        let bootstrap_node = bootstrap_nodes[0].clone();
+
+        shared_network_state.register_node(bootstrap_node.id, bootstrap_node.name, bootstrap_node.address, bootstrap_node.port);
+
         let response_result = admin_network.session_request(crate::create_session_request::CreateSessionRequest { 
             new_node: crate::app_node::AppNode {
                 id: node_id,
@@ -216,7 +220,7 @@ fn main() {
     std::thread::spawn(move || webserver.start());
 
     std::thread::spawn(move || {
-        const SECONDS_DELAY: u64 = 1;
+        const SECONDS_DELAY: u64 = 5;
 
         info!("Waiting for {} before setting up config", SECONDS_DELAY);
 
@@ -242,10 +246,6 @@ fn main() {
             info!("Registering this node: {}", needs_to_join);
 
             debug!("Attempting to join cluster");
-
-            let bootstrap_node = bootstrap_nodes[0].clone();
-
-            shared_network_state.register_node(bootstrap_node.id, bootstrap_node.name, bootstrap_node.address, bootstrap_node.port);
         }
     });
 
