@@ -7,7 +7,7 @@ use actix_raft::messages::VoteResponse;
 use actix_raft::{messages, RaftNetwork};
 use crate::shared_network_state::SharedNetworkState;
 use actix::fut::result;
-use log::{debug, error};
+use log::{debug, error, info};
 use actix_raft::NodeId;
 use serde::{Serialize};
 use serde::de::DeserializeOwned;
@@ -93,6 +93,7 @@ impl AppNetwork {
             },
             None => { 
                 error!("Unable to find node with id: {}", node_id );
+                panic!("Not gonna happen");
                 return Box::new(result(Err(()))) 
             }
         }
@@ -120,15 +121,21 @@ impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
     ) -> Self::Result {
         let node_option = self.shared_network_state.get_node(msg.target);
 
+        info!("AppendEntriesRequest: {:?}", msg);
+
         match node_option {
             Some(node) => {
                 return match self.post(node.id, msg, "/rpc/appendEntriesRequest") {
-                    Ok(resp) => Box::new(result(Ok(resp))),
+                    Ok(resp) => {
+                        info!("AppendEntriesRequest response: {:?}", resp);
+
+                        Box::new(result(Ok(resp)))
+                    },
                     Err(_) => Box::new(result(Err(())))
                 };
 
             },
-            None => return Box::new(result(Err(())))
+            None => panic!("Hang on, where do I send this thing?")//return Box::new(result(Err(())))
         }
     }
 }
@@ -212,4 +219,3 @@ impl AdminNetwork {
         }
     }
 }
-

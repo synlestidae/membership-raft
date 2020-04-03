@@ -8,7 +8,7 @@ use actix_raft::storage;
 use std::mem;
 use serde::{Serialize, Deserialize};
 use crate::shared_network_state::SharedNetworkState;
-use log::{debug, trace};
+use log::{debug, trace, info};
 
 #[derive(Serialize, Deserialize)]
 pub struct AppStorage {
@@ -36,18 +36,21 @@ impl AppStorage {
             }
         }
 
-        if self.logs.len() == entry.index as usize {
-            self.logs.push(entry);
-            Ok(())
+        self.logs.push(entry);
+        Ok(())
+
+        /*if self.logs.len() == entry.index as usize {
         } else {
             Ok(())
-        }
+        }*/
     }
 
     fn apply_to_state_machine(&mut self, data: Data) {
         debug!("Received message: {:?}", data);
         match data {
-            Data::AddNode { .. } => {}
+            Data::AddNode { id, name, address, port } => {
+                self.shared_network_state.register_node(id, name, address, port);
+            }
         }
     }
 
@@ -124,15 +127,19 @@ impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
         msg: storage::GetLogEntries<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        debug!("Handling GetLogEntries");
+        debug!("Handling GetLogEntries: {}, {}", msg.start, msg.stop);
 
-        Box::new(result(Ok(self
+        let r = self
             .logs
             .iter()
             .skip(msg.start as usize)
             .take(msg.stop as usize - msg.start as usize)
             .cloned()
-            .collect())))
+            .collect::<Vec<_>>();
+
+        info!("GetLogEntries: Got {} logs: {:?}", r.len(), r);
+
+        Box::new(result(Ok(r)))
     }
 }
 
@@ -199,7 +206,7 @@ impl Handler<storage::ReplicateToStateMachine<Data, Error>> for AppStorage {
         msg: storage::ReplicateToStateMachine<Data, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        debug!("Handling ReplicateToStateMachine");
+        debug!("Handling ReplicateToStateMachine: {:?}", msg.payload);
 
         for e in msg.payload {
             self.apply_entry_to_state_machine(e.payload);

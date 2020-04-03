@@ -82,7 +82,7 @@ impl Handler for PostHandler {
 
                 debug!("Register node {} with IP {} and port {}", node_id, ip, node_port);
 
-                self.shared_network.register_node(node_id, "remote-node", ip.ip(), ip.port());
+                //self.shared_network.register_node(node_id, "remote-node", ip.ip(), ip.port());
             },
             result => debug!("Cannot get IP from request: {:?}", result)
         };
@@ -122,7 +122,7 @@ impl From<actix::MailboxError> for WebServerError {
     }
 }
 
-use log::{debug, error};
+use log::{debug, error, info};
 use actix_raft::admin;
 
 impl PostHandler {
@@ -203,6 +203,10 @@ impl PostHandler {
 
         let new_node = request.new_node;
 
+        info!("New node: {:?}", new_node);
+
+        shared_network.register_node(new_node.id, &new_node.name, new_node.address, new_node.port);
+
         let entry = messages::EntryNormal { 
             data: Data::AddNode { 
                 id: new_node.id,
@@ -212,17 +216,7 @@ impl PostHandler {
             } 
         };
 
-        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
-
-        match self.addr.send(payload).wait()? {
-            Ok(_) => {},
-            Err(err) => {
-                error!("Error sending ClientPayload: {:?}", err);
-                return Ok(CreateSessionResponse::Error);
-            }
-        }
-
-        match self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])).wait()? {
+        let result = match self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])).wait()? {
             Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
                 let leader_node_option = shared_network.get_node(node_id);
 
@@ -244,16 +238,26 @@ impl PostHandler {
                 error!("Error with creating session: {:?}", err);
                 Ok(CreateSessionResponse::Error)
             },
+        };
+
+        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Committed);
+
+        match self.addr.send(payload).wait()? {
+            Ok(_) => result,
+            Err(err) => {
+                error!("Error sending ClientPayload: {:?}", err);
+                return Ok(CreateSessionResponse::Error);
+            }
         }
     }
 }
 
 impl WebServer {
-    pub(crate) fn new(port: u16, addr: Addr<AppRaft>) -> Self {
+    pub(crate) fn new(port: u16, addr: Addr<AppRaft>, shared_network_state: SharedNetworkState) -> Self {
         Self {
             port,
             addr,
-            shared_network: SharedNetworkState::new(),
+            shared_network: shared_network_state,
             rocket_config: ConfigBuilder::new(Environment::Staging)
                 .address("0.0.0.0")
                 .port(port)
