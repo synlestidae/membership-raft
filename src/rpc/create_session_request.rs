@@ -1,13 +1,10 @@
-use crate::app_node::AppNode;
-use actix_raft::NodeId;
+use crate::node::AppNode;
 use serde::{Deserialize, Serialize};
-use actix_raft::admin;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
     pub new_node: AppNode,
     pub dest_node: AppNode,
-    //pub node_id: NodeId
 }
 
 impl actix::Message for CreateSessionRequest {
@@ -16,7 +13,7 @@ impl actix::Message for CreateSessionRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CreateSessionResponse {
-    Error,// { error: admin::ProposeConfigChangeError<crate::Data, crate::DataResponse, crate::error::Error> }, 
+    Error,
     RedirectToLeader { leader_node : AppNode },
     Success
 }

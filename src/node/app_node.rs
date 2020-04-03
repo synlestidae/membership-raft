@@ -8,8 +8,3 @@ pub struct AppNode {
     pub address: IpAddr,
     pub port: u16
 }
-
-/// Your application's network interface actor.
-pub struct AppNetwork {
-    nodes: Vec<AppNode>
-}

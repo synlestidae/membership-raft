@@ -1,4 +1,4 @@
-use crate::app_node::AppNode;
+use crate::node::AppNode;
 use std::sync::Arc;
 use std::sync::Mutex;
 use serde::{Serialize, Serializer, Deserialize};
@@ -13,7 +13,6 @@ pub struct SharedNetworkState {
 }
 
 fn nodes_deserialize<'r, D: Deserializer<'r>>(deserializer: D) -> Result<Arc<Mutex<Vec<AppNode>>>, D::Error> {//<D: Deserializer>(derializer: D) -> Result<D::Ok, D::Error> {
-    //Ok(data)
     let bytes: Vec<u8> = serde::de::Deserialize::deserialize(deserializer)?;
     let array: Vec<AppNode> = bincode::deserialize(&bytes).map_err(serde::de::Error::custom)?;
 
@@ -22,7 +21,6 @@ fn nodes_deserialize<'r, D: Deserializer<'r>>(deserializer: D) -> Result<Arc<Mut
 
 fn nodes_serialize<S: Serializer>(nodes: &Arc<Mutex<Vec<AppNode>>>, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_bytes(&bincode::serialize(&*nodes.lock().unwrap()).unwrap())
-    //unimplemented!()
 }
 
 impl SharedNetworkState {
@@ -48,4 +46,3 @@ impl SharedNetworkState {
         self.nodes.lock().unwrap().iter().cloned().find(|n| n.id == id)
     }
 }
-

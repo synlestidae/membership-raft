@@ -1,5 +1,5 @@
 use actix_raft::NodeId;
-use crate::app_node::AppNode;
+use crate::node::AppNode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]

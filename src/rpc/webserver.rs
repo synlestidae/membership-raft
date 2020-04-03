@@ -3,10 +3,9 @@ use actix::prelude::Future;
 use actix_raft::messages;
 use bincode;
 use crate::AppRaft;
-use crate::Data;
-use crate::client_payload::ClientPayload;
-use crate::create_session_request::{CreateSessionRequest, CreateSessionResponse};
-use crate::shared_network_state::SharedNetworkState;
+use crate::node::SharedNetworkState;
+use crate::raft::ClientPayload;
+use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
 use rocket::Data as RocketData;
 use rocket::Handler;
 use rocket::Request;
@@ -18,16 +17,13 @@ use rocket::http::ContentType;
 use rocket::http::Method;
 use rocket::http::Status;
 use rocket::response::Responder;
-use rocket::response::status::Custom;
 use rocket::response;
 use rocket;
-use rocket_contrib::json::Json;
 use serde::{Serialize};
 use std::convert::From;
 use std::io::Read;
 
 pub struct WebServer {
-    port: u16,
     addr: Addr<AppRaft>,
     shared_network: SharedNetworkState,
     rocket_config: Config 
@@ -53,8 +49,6 @@ impl<'r> Responder<'r> for WebServerError {
     }
 }
 
-pub type ResultResponse<T> = Result<Custom<Json<T>>, WebServerError>;
-
 #[derive(Clone)]
 struct PostHandler {
     addr: Addr<AppRaft>,
@@ -70,7 +64,7 @@ use std::io::Cursor;
 impl Handler for PostHandler {
     fn handle<'r>(&self, request: &'r Request, data: RocketData) -> Outcome<'r> {
         let mut buffer = Vec::new();
-        data.open().read_to_end(&mut buffer);
+        data.open().read_to_end(&mut buffer).unwrap();
 
         let node_id = request.headers().get_one("x-node-id");
         let node_port = request.headers().get_one("x-node-port");
@@ -110,14 +104,14 @@ impl Handler for PostHandler {
                 Outcome::Success(response) 
             
             },
-            Err(error) => Outcome::Failure(Status::InternalServerError)
+            Err(_) => Outcome::Failure(Status::InternalServerError)
         }
     }
 
 }
 
 impl From<actix::MailboxError> for WebServerError {
-    fn from(err: actix::MailboxError) -> Self {
+    fn from(_: actix::MailboxError) -> Self {
         unimplemented!()
     }
 }
@@ -126,7 +120,7 @@ use log::{debug, error, info};
 use actix_raft::admin;
 
 impl PostHandler {
-    fn handle_client_payload(&self, data: Vec<u8>) -> Result<messages::ClientPayloadResponse<crate::DataResponse>, WebServerError> {
+    fn handle_client_payload(&self, data: Vec<u8>) -> Result<messages::ClientPayloadResponse<crate::raft::DataResponse>, WebServerError> {
         let payload: ClientPayload = bincode::deserialize(&data)?;
 
         let result = self.addr
@@ -145,7 +139,7 @@ impl PostHandler {
     fn handle_append_entries(&self, data: Vec<u8>) -> Result<messages::AppendEntriesResponse, WebServerError> {
         debug!("Deserialising AppendEntriesRequest request of length {}", data.len());
 
-        let payload: messages::AppendEntriesRequest<Data> = bincode::deserialize(&data)?;
+        let payload: messages::AppendEntriesRequest<crate::raft::Transition> = bincode::deserialize(&data)?;
 
         debug!("Handling AppendEntriesRequest: {:?}", payload);
 
@@ -197,7 +191,7 @@ impl PostHandler {
         }
     }
 
-    fn handle_create_session_request(&self, data: Vec<u8>) -> Result<crate::create_session_request::CreateSessionResponse, WebServerError> {
+    fn handle_create_session_request(&self, data: Vec<u8>) -> Result<crate::rpc::CreateSessionResponse, WebServerError> {
         let mut shared_network = self.shared_network.clone();
         let request: CreateSessionRequest = bincode::deserialize(&data)?;
 
@@ -208,7 +202,7 @@ impl PostHandler {
         shared_network.register_node(new_node.id, &new_node.name, new_node.address, new_node.port);
 
         let entry = messages::EntryNormal { 
-            data: Data::AddNode { 
+            data: crate::raft::Transition::AddNode { 
                 id: new_node.id,
                 name: new_node.name,
                 address: new_node.address,
@@ -255,7 +249,6 @@ impl PostHandler {
 impl WebServer {
     pub(crate) fn new(port: u16, addr: Addr<AppRaft>, shared_network_state: SharedNetworkState) -> Self {
         Self {
-            port,
             addr,
             shared_network: shared_network_state,
             rocket_config: ConfigBuilder::new(Environment::Staging)
@@ -279,7 +272,8 @@ impl WebServer {
         let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler.clone());
         let admin_metrics = Route::new(Method::Post, "/admin/metrics", post_handler);
 
-        let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![
+        let rocket = rocket::custom(self.rocket_config.clone())
+            .mount("/", vec![
             post_client_payload_route,
             append_entries_route,
             vote_request_route,

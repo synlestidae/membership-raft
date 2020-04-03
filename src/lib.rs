@@ -1,9 +1,10 @@
+#![deny(warnings)]
 extern crate actix;
 extern crate actix_raft;
 extern crate bincode;
 extern crate serde;
 extern crate tokio;
-#[macro_use] extern crate rocket;
+extern crate rocket;
 extern crate rocket_contrib;
 extern crate toml;
 extern crate clap;
@@ -16,108 +17,36 @@ extern crate futures;
 extern crate tarpc;
 
 use actix_raft::Raft;
-
-use actix_raft::{AppData, AppDataResponse};
+use actix_raft::admin;
 use actix_raft::messages;
-use serde::{Deserialize, Serialize};
+use actix_raft::{Config as RaftConfig};
+use crate::actix::Actor;
+use crate::clap::Clap;
+use log::{info, error};
 
 mod error;
-mod network;
-mod storage;
-mod app_node;
-mod shared_network_state;
-mod webserver;
-mod client_payload;
-mod metrics;
-mod app_state;
 mod config;
+mod discovery;
+mod node;
+mod raft;
 mod rpc;
-mod server;
-mod create_session_request;
-
-/// The application's data type.
-///
-/// Enum types are recommended as typically there will be different types of data mutating
-/// requests which will be submitted by application clients.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Data {
-    // Your data variants go here.
-    AddNode { id: u64, name: String, address: std::net::IpAddr, port: u16 },
-}
 
 /// The application's data response types.
 ///
 /// Enum types are recommended as typically there will be multiple response types which can be
 /// returned from the storage layer.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum DataResponse {
-    // Your response variants go here.
-    Success { msg: String }
-}
-
-impl DataResponse {
-    pub fn success<S: ToString>(s: S) -> Self {
-        DataResponse::Success { msg: s.to_string() }
-    }
-}
 
 /// This also has a `'static` lifetime constraint, so no `&` references at this time.
 /// The new futures & async/await should help out with this quite a lot, so
 /// hopefully this constraint will be removed in actix as well.
-impl AppData for Data {
-}
-
-/// This also has a `'static` lifetime constraint, so no `&` references at this time.
-impl AppDataResponse for DataResponse {}
 
 
 /// A type alias used to define an application's concrete Raft type.
-type AppRaft = Raft<Data, DataResponse, error::Error, network::AppNetwork, storage::AppStorage>;
+type AppRaft = Raft<raft::Transition, raft::DataResponse, error::Error, raft::AppNetwork, raft::AppStorage>;
 
-use actix_raft::{Config as RaftConfig, ConfigBuilder, SnapshotPolicy};
-
-use crate::actix::Actor;
-
-use actix_raft::admin;
-
-use clap::Clap;
-
-/// This doc string acts as a help message when the user runs '--help'
-/// as do all doc strings on fields
-#[derive(Clap, Debug)]
-#[clap(version = "0.1", author = "Mate Antunovic")]
-struct Opts {
-    #[clap(short = "c", long = "config")]
-    pub config: Option<String>,
-
-    #[clap(short = "n", long = "nodeid")]
-    pub node_id: Option<u64>,
-}
-
-use log::{info, error, debug};
-use actix::Context;
-use actix::Handler;
-
-/// Your application's metrics interface actor.
-struct AppMetrics {/* ... snip ... */}
-
-impl Actor for AppMetrics {
-    type Context = Context<Self>;
-
-    // ... snip ... other actix methods can be implemented here as needed.
-}
-
-impl Handler<actix_raft::RaftMetrics> for AppMetrics {
-    type Result = ();
-
-    fn handle(&mut self, msg: actix_raft::RaftMetrics, _ctx: &mut Context<Self>) -> Self::Result {
-        debug!("Metrics: {:?}", msg)
-    }
-}
-
-fn main() {
+pub fn main() {
     simple_logger::init().unwrap();
-    let opts: Opts = Opts::parse();
+    let opts: config::Opts = config::Opts::parse();
 
     info!("Opts: {:?}", opts);
 
@@ -136,7 +65,7 @@ fn main() {
 
     info!("Node config: {:?}", node_config);
 
-    let shared_network_state = shared_network_state::SharedNetworkState::new();
+    let shared_network_state = node::SharedNetworkState::new();
 
     for n in node_config.bootstrap_nodes.iter() {
         info!("Bootstrap node: {:?}", n);
@@ -193,9 +122,9 @@ fn main() {
     };
 
     // Start the various actor types and hold on to their addrs.
-    let network = network::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
-    let storage = storage::AppStorage::new(shared_network_state.clone(), membership);
-    let metrics = AppMetrics {};
+    let network = raft::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
+    let storage = raft::AppStorage::new(shared_network_state.clone(), membership);
+    let metrics = raft::AppMetrics {};
 
     let network_addr = network.start();
 
@@ -205,9 +134,9 @@ fn main() {
 
     let app_raft_address = app_raft.start();
 
-    let mut webserver = webserver::WebServer::new(port, app_raft_address.clone(), shared_network_state.clone());
+    let mut webserver = rpc::WebServer::new(port, app_raft_address.clone(), shared_network_state.clone());
 
-    let mut admin_network = network::AdminNetwork { };
+    let mut admin_network = rpc::AdminNetwork::new();
 
     std::thread::spawn(move || webserver.start());
 
@@ -215,10 +144,9 @@ fn main() {
         if needs_to_join {
             std::thread::sleep(std::time::Duration::new(0, 1000));
             info!("Asking for a new session");
-            let bootstrap_node = bootstrap_nodes[0].clone();
 
-            let response_result = admin_network.session_request(crate::create_session_request::CreateSessionRequest { 
-                new_node: crate::app_node::AppNode {
+            let response_result = admin_network.session_request(rpc::CreateSessionRequest { 
+                new_node: node::AppNode {
                     id: node_id,
                     address: "127.0.0.1".parse().unwrap(),
                     name: String::from("test-node"),

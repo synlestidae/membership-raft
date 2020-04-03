@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use crate::app_node::AppNode;
-use crate::Data;
+use crate::node::AppNode;
+//use crate::raft::Transition;
 
 #[derive(Deserialize, Serialize)]
 pub struct AppState {
@@ -8,16 +8,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn apply(&mut self, transition: Data) {
+    /*pub fn apply(&mut self, transition: Transition) {
         match transition {
-            Data::AddNode { id, name, address, port } => self.nodes.push(AppNode {
+            Transition::AddNode { id, name, address, port } => self.nodes.push(AppNode {
                 id,
                 name, 
                 address,
                 port
             })
         }
-
-        unimplemented!()
-    }
+    }*/
 }

@@ -1,21 +1,21 @@
-use crate::error::Error;
-use crate::Data;
-use crate::DataResponse;
 use actix::fut::result;
 use actix::{Actor, Context, Handler, ResponseActFuture};
 use actix_raft::messages;
 use actix_raft::storage;
-use std::mem;
-use serde::{Serialize, Deserialize};
-use crate::shared_network_state::SharedNetworkState;
+use crate::error::Error;
+use crate::node::SharedNetworkState;
+use crate::raft::DataResponse;
+use crate::raft::Transition;
 use log::{debug, trace, info};
+use serde::{Serialize, Deserialize};
+use std::mem;
 
 #[derive(Serialize, Deserialize)]
 pub struct AppStorage {
     shared_network_state: SharedNetworkState,
     snapshot_path: Option<String>,
     membership: messages::MembershipConfig,
-    logs: Vec<messages::Entry<Data>>,
+    logs: Vec<messages::Entry<Transition>>,
 }
 
 impl AppStorage {
@@ -28,7 +28,7 @@ impl AppStorage {
         }
     }
 
-    fn upsert_entry(&mut self, entry: messages::Entry<Data>) -> Result<(), Error> {
+    fn upsert_entry(&mut self, entry: messages::Entry<Transition>) -> Result<(), Error> {
         for (i, e) in self.logs.iter_mut().enumerate() {
             if i as u64 == e.index {
                 mem::replace(e, entry);
@@ -45,16 +45,16 @@ impl AppStorage {
         }*/
     }
 
-    fn apply_to_state_machine(&mut self, data: Data) {
+    fn apply_to_state_machine(&mut self, data: Transition) {
         debug!("Received message: {:?}", data);
         match data {
-            Data::AddNode { id, name, address, port } => {
+            Transition::AddNode { id, name, address, port } => {
                 self.shared_network_state.register_node(id, name, address, port);
             }
         }
     }
 
-    fn apply_entry_to_state_machine(&mut self, msg: messages::EntryPayload<Data>) {
+    fn apply_entry_to_state_machine(&mut self, msg: messages::EntryPayload<Transition>) {
         trace!("Applying msg {:?}", msg);
         match msg {
             messages::EntryPayload::Blank => {}
@@ -75,7 +75,7 @@ impl Actor for AppStorage {
     type Context = Context<Self>;
 }
 
-impl storage::RaftStorage<Data, DataResponse, Error> for AppStorage {
+impl storage::RaftStorage<Transition, DataResponse, Error> for AppStorage {
     type Actor = Self;
 
     type Context = Context<Self>;
@@ -110,7 +110,7 @@ impl Handler<storage::SaveHardState<Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        msg: storage::SaveHardState<Error>,
+        _msg: storage::SaveHardState<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling SaveHardState");
@@ -119,12 +119,12 @@ impl Handler<storage::SaveHardState<Error>> for AppStorage {
     }
 }
 
-impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
-    type Result = ResponseActFuture<Self, Vec<messages::Entry<Data>>, Error>;
+impl Handler<storage::GetLogEntries<Transition, Error>> for AppStorage {
+    type Result = ResponseActFuture<Self, Vec<messages::Entry<Transition>>, Error>;
 
     fn handle(
         &mut self,
-        msg: storage::GetLogEntries<Data, Error>,
+        msg: storage::GetLogEntries<Transition, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling GetLogEntries: {}, {}", msg.start, msg.stop);
@@ -143,12 +143,12 @@ impl Handler<storage::GetLogEntries<Data, Error>> for AppStorage {
     }
 }
 
-impl Handler<storage::AppendEntryToLog<Data, Error>> for AppStorage {
+impl Handler<storage::AppendEntryToLog<Transition, Error>> for AppStorage {
     type Result = ResponseActFuture<Self, (), Error>;
 
     fn handle(
         &mut self,
-        msg: storage::AppendEntryToLog<Data, Error>,
+        msg: storage::AppendEntryToLog<Transition, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling AppendEntryToLog");
@@ -159,12 +159,12 @@ impl Handler<storage::AppendEntryToLog<Data, Error>> for AppStorage {
     }
 }
 
-impl Handler<storage::ReplicateToLog<Data, Error>> for AppStorage {
+impl Handler<storage::ReplicateToLog<Transition, Error>> for AppStorage {
     type Result = ResponseActFuture<Self, (), Error>;
 
     fn handle(
         &mut self,
-        msg: storage::ReplicateToLog<Data, Error>,
+        msg: storage::ReplicateToLog<Transition, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling ReplicateToLog");
@@ -180,12 +180,12 @@ impl Handler<storage::ReplicateToLog<Data, Error>> for AppStorage {
     }
 }
 
-impl Handler<storage::ApplyEntryToStateMachine<Data, DataResponse, Error>> for AppStorage {
+impl Handler<storage::ApplyEntryToStateMachine<Transition, DataResponse, Error>> for AppStorage {
     type Result = ResponseActFuture<Self, DataResponse, Error>;
 
     fn handle(
         &mut self,
-        msg: storage::ApplyEntryToStateMachine<Data, DataResponse, Error>,
+        msg: storage::ApplyEntryToStateMachine<Transition, DataResponse, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling ApplyEntryToStateMachine");
@@ -198,12 +198,12 @@ impl Handler<storage::ApplyEntryToStateMachine<Data, DataResponse, Error>> for A
     }
 }
 
-impl Handler<storage::ReplicateToStateMachine<Data, Error>> for AppStorage {
+impl Handler<storage::ReplicateToStateMachine<Transition, Error>> for AppStorage {
     type Result = ResponseActFuture<Self, (), Error>;
 
     fn handle(
         &mut self,
-        msg: storage::ReplicateToStateMachine<Data, Error>,
+        msg: storage::ReplicateToStateMachine<Transition, Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling ReplicateToStateMachine: {:?}", msg.payload);
@@ -250,7 +250,7 @@ impl Handler<storage::InstallSnapshot<Error>> for AppStorage {
 
     fn handle(
         &mut self,
-        msg: storage::InstallSnapshot<Error>,
+        _msg: storage::InstallSnapshot<Error>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         debug!("Handling InstallSnapshot");

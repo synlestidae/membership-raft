@@ -1,20 +1,20 @@
-use crate::Data;
+use actix::fut::result;
 use actix::{Actor, Context, Handler, ResponseActFuture};
+use actix_raft::NodeId;
 use actix_raft::messages::InstallSnapshotRequest;
 use actix_raft::messages::InstallSnapshotResponse;
 use actix_raft::messages::VoteRequest;
 use actix_raft::messages::VoteResponse;
 use actix_raft::{messages, RaftNetwork};
-use crate::shared_network_state::SharedNetworkState;
-use actix::fut::result;
-use log::{debug, error, info};
-use actix_raft::NodeId;
-use serde::{Serialize};
-use serde::de::DeserializeOwned;
-use std::io::Cursor;
-use std::fmt::Debug;
 use crate::config::WebserverConfig;
-use crate::create_session_request::*;
+use crate::node::SharedNetworkState;
+use crate::raft::Transition;
+use log::{debug, error, info};
+use reqwest::blocking::Body;
+use serde::de::DeserializeOwned;
+use serde::{Serialize};
+use std::fmt::Debug;
+use std::io::Cursor;
 
 
 /// Your application's network interface actor.
@@ -45,14 +45,14 @@ impl AppNetwork {
                 let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
                 let body: Body = body_bytes.into();
 
-                let responseResult = reqwest::blocking::Client::new().post(&uri)
+                let response_result = reqwest::blocking::Client::new().post(&uri)
                     .header("User-Agent", "Membership-Raft")
                     .header("X-Node-Id", self.node_id)
                     .header("X-Node-Port", self.webserver.port)
                     .body(body)
                     .send();
 
-                let res = match responseResult {
+                let res = match response_result {
                     Ok(resp) => {
                         let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
                         debug!("Deserializing {} bytes from {}", bytes.len(), path);
@@ -94,7 +94,6 @@ impl AppNetwork {
             None => { 
                 error!("Unable to find node with id: {}", node_id );
                 panic!("Not gonna happen");
-                return Box::new(result(Err(()))) 
             }
         }
     }
@@ -107,16 +106,16 @@ impl Actor for AppNetwork {
 }
 
 // Ensure you impl this over your application's data type. Here, it is `Data`.
-impl RaftNetwork<Data> for AppNetwork {}
+impl RaftNetwork<Transition> for AppNetwork {}
 
 // Then you just implement the various message handlers.
 // See the network chapter for details.
-impl Handler<messages::AppendEntriesRequest<Data>> for AppNetwork {
+impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
     type Result = ResponseActFuture<Self, messages::AppendEntriesResponse, ()>;
 
     fn handle(
         &mut self,
-        msg: messages::AppendEntriesRequest<Data>,
+        msg: messages::AppendEntriesRequest<Transition>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         let node_option = self.shared_network_state.get_node(msg.target);
@@ -150,11 +149,6 @@ impl Handler<InstallSnapshotRequest> for AppNetwork {
     }
 }
 
-use futures_util::FutureExt;
-use futures_util::TryFutureExt;
-use actix::fut::IntoActorFuture;
-use reqwest::blocking::Body;
-
 // Impl handlers on `AppNetwork` for the other `actix_raft::messages` message types.
 //
 impl Handler<VoteRequest> for AppNetwork {
@@ -164,58 +158,5 @@ impl Handler<VoteRequest> for AppNetwork {
         debug!("Handling VoteRequest: {:?}", msg);
 
         self.handle_http(msg.target, "/rpc/voteRequest", msg)
-    }
-}
-
-pub struct AdminNetwork { }
-
-impl Actor for AdminNetwork {
-    type Context = Context<Self>;
-}
-
-impl AdminNetwork {
-    pub fn session_request(&mut self, msg: CreateSessionRequest) -> Result<CreateSessionResponse, ()> {
-        debug!("Handling CreateSessionRequest: {:?}", msg);
-
-        match self.post_to_uri(&format!("http://{}:{}/client/createSessionRequest", msg.dest_node.address, msg.dest_node.port), msg) {
-            Ok(resp) => Ok(resp),
-            Err(err) => { 
-                error!("Error making session request: {:?}", err);
-                Err(())
-            }
-        }
-    }
-
-    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: &str, msg: S) -> Result<D, reqwest::Error> {
-        //let uri = format!("http://{}:{}{}", node.address, node.port, path);
-        debug!("POST to {}", uri); 
-        debug!("Serializing: {:?}", msg);
-
-        let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
-        let body: Body = body_bytes.into();
-
-        let responseResult = reqwest::blocking::Client::new().post(uri)
-            .header("User-Agent", "Membership-Raft")
-            //.header("X-Node-Id", self.node_id)
-            //.header("X-Node-Port", self.webserver.port)
-            .body(body)
-            .send();
-
-        match responseResult {
-            Ok(resp) => {
-                let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
-                debug!("Deserializing {} bytes from {}", bytes.len(), uri);
-
-                let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
-                debug!("Deserialized: {:?}", response);
-
-                Ok(response)
-            },
-            Err(err) => {
-                error!("Error in response: {:?}", err);
-
-                Err(err)
-            }
-        }
     }
 }
