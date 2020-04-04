@@ -21,15 +21,17 @@ use std::io::Cursor;
 pub struct AppNetwork {
     shared_network_state: SharedNetworkState,
     node_id: NodeId,
-    webserver: WebserverConfig
+    webserver: WebserverConfig,
+    pub app_raft_addr: Option<actix::Addr<crate::AppRaft>>
 }
 
 impl AppNetwork {
-    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId, webserver: &WebserverConfig) -> Self {
+    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId, webserver: &WebserverConfig/*, app_raft_addr: actix::Addr<crate::AppRaft>*/) -> Self {
         Self {
             shared_network_state,
             node_id,
-            webserver: webserver.clone()
+            webserver: webserver.clone(),
+            app_raft_addr: None
         }
     }
 
@@ -130,7 +132,17 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
 
                         Box::new(result(Ok(resp)))
                     },
-                    Err(_) => Box::new(result(Err(())))
+                    Err(_) => { 
+                        use crate::futures::Future;
+                        if let Some(addr) = self.app_raft_addr {
+                            match addr.send(actix_raft::admin::ProposeConfigChange::new(vec![], vec![node.id])).wait() {
+                                Ok(_) => debug!("Successfully removed node {}", node.id),
+                                Err(err) => error!("Error removing node: {:?}", err)
+                            };
+                        }
+
+                        Box::new(result(Err(())))
+                    }
                 };
 
             },

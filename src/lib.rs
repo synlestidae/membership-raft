@@ -122,7 +122,7 @@ pub fn main() {
     };
 
     // Start the various actor types and hold on to their addrs.
-    let network = raft::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
+    let mut network = raft::AppNetwork::new(shared_network_state.clone(), node_id, &node_config.webserver);
     let storage = raft::AppStorage::new(shared_network_state.clone(), membership);
     let metrics = raft::AppMetrics {};
 
@@ -133,6 +133,8 @@ pub fn main() {
     let port = node_config.webserver.port;
 
     let app_raft_address = app_raft.start();
+
+    network.app_raft_addr = Some(app_raft_address.clone());
 
     let mut webserver = rpc::WebServer::new(port, app_raft_address.clone(), shared_network_state.clone());
 
