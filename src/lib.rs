@@ -32,6 +32,7 @@ mod discovery;
 mod node;
 mod raft;
 mod rpc;
+mod startup;
 
 /// The application's data response types.
 ///
@@ -140,7 +141,7 @@ pub fn main() {
 
     let raft_addr = app_raft_address.clone();
 
-    let startup = StartupActor { node_id, raft_addr: raft_addr.clone(), admin_api: rpc::AdminNetwork::new() };
+    let startup = startup::StartupActor { node_id, raft_addr: raft_addr.clone(), admin_api: rpc::AdminNetwork::new() };
 
     let startup_addr = startup.start();
 
@@ -171,6 +172,8 @@ pub fn main() {
             };
 
             if is_err {
+                use crate::futures::Future;
+
                 error!("Node {} has FAILED!", node_id);
                 match raft_addr.send(admin::ProposeConfigChange::new(vec![], vec![node_id])).wait() {
                     Ok(Ok(info)) => { 
@@ -229,12 +232,14 @@ pub fn main() {
         std::thread::sleep(std::time::Duration::new(2, 0));
         
         let msg = if node_config.new_cluster {
-            StartupRequest::NewCluster { config: node_config, cluster_config: ClusterConfig { } }
+            startup::StartupRequest::NewCluster { config: node_config, cluster_config: startup::ClusterConfig { } }
         } else {
-            StartupRequest::ExistingCluster { config: node_config }
+            startup::StartupRequest::ExistingCluster { config: node_config }
         };
 
-        let res = startup_addr.send(msg);/*.map(|res| {
+        use crate::futures::Future;
+
+        let res = startup_addr.send(msg).wait();/*.map(|res| {
             info!("Result of startup: {:?}", res)
         });*/
 
@@ -248,104 +253,9 @@ pub fn main() {
         };
     });
 
-    sys.run().unwrap();
-}
+    match sys.run() {
+        Err(err) => error!("Error in runtime: {:?}", err),
+        Ok(_) => {}
 
-struct StartupActor {
-    node_id: actix_raft::NodeId,
-    raft_addr: actix::Addr<AppRaft>,
-    admin_api: rpc::AdminNetwork 
-}
-
-impl StartupActor {
-    pub fn new(
-        node_id: actix_raft::NodeId,
-        raft_addr: actix::Addr<AppRaft>,
-        admin_api: rpc::AdminNetwork) -> Self {
-        Self {
-            raft_addr,
-            node_id,
-            admin_api
-        }
-    }
-}
-
-impl Actor for StartupActor {
-    type Context = actix::Context<Self>;
-
-    fn started(&mut self, _ctx: &mut Self::Context) {
-
-    }
-}
-
-#[derive(Debug)]
-pub struct ClusterConfig {
-}
-
-#[derive(Debug)]
-pub enum StartupRequest {
-    NewCluster { cluster_config: ClusterConfig, config: crate::config::Config },
-    ExistingCluster { config: crate::config::Config } 
-}
-
-impl actix::Message for StartupRequest {
-    type Result = Result<StartupResponse, StartupErr>;
-}
-
-#[derive(Debug)]
-pub struct StartupResponse {
-}
-
-#[derive(Debug)]
-pub struct StartupErr {
-}
-
-use crate::futures::Future;
-
-impl actix::Handler<StartupRequest> for StartupActor {
-    type Result = actix::ResponseActFuture<Self, StartupResponse, StartupErr>;
-
-    fn handle(&mut self, msg: StartupRequest, _: &mut <Self as actix::Actor>::Context) -> Self::Result { 
-        match msg {
-            StartupRequest::NewCluster { cluster_config: _, config: _ } => {
-                info!("Starting a new cluster");
-
-                let init_with_config = admin::InitWithConfig {
-                    members: vec![self.node_id]
-                };
-
-                info!("Initialising with just one member (me!)");
-
-                match self.raft_addr.send(init_with_config).wait() {
-                    Ok(r) => {
-                        info!("Successfully added config: {:?}", r);
-
-                        Box::new(result(Ok(StartupResponse {})))
-                    },
-                    Err(err) => {
-                        error!("Error adding config: {:?}", err);
-
-                        Box::new(result(Err(StartupErr {})))
-                    }
-                }
-            },
-            StartupRequest::ExistingCluster { config } => {
-                let msg = rpc::CreateSessionRequest {
-                    new_node: node::AppNode {
-                        id: self.node_id,
-                        name: config.name.to_string(),
-                        host: config.webserver.host.clone(),
-                        port: config.webserver.port
-                    }
-                };
-                let url = reqwest::Url::parse(&format!("http://{}/client/createSessionRequest", config.bootstrap_hosts[0])).unwrap();
-                let admin_api_result = self.admin_api.session_request(url, msg);
-
-                match admin_api_result {
-                    Err(_) => Box::new(result(Err(StartupErr { }))),
-                    Ok(_) => Box::new(result(Ok(StartupResponse {})))
-                }
-            }
-        }
-    }
+    };
 }
