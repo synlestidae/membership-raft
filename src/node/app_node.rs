@@ -5,6 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct AppNode {
     pub id: u64,
     pub name: String,
-    pub address: IpAddr,
+    pub host: String,
     pub port: u16
 }

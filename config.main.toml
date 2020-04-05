@@ -1,4 +1,6 @@
-node_id = 1
+name = "main"
+new_cluster = true
 
 [webserver]
+host = "localhost"
 port = 5001

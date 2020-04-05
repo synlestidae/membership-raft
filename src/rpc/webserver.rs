@@ -199,13 +199,13 @@ impl PostHandler {
 
         info!("New node: {:?}", new_node);
 
-        shared_network.register_node(new_node.id, &new_node.name, new_node.address, new_node.port);
+        shared_network.register_node(new_node.id, &new_node.name, new_node.host.clone(), new_node.port);
 
         let entry = messages::EntryNormal { 
             data: crate::raft::Transition::AddNode { 
                 id: new_node.id,
                 name: new_node.name,
-                address: new_node.address,
+                host: new_node.host,
                 port: new_node.port 
             } 
         };

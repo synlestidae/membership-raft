@@ -48,8 +48,8 @@ impl AppStorage {
     fn apply_to_state_machine(&mut self, data: Transition) {
         debug!("Received message: {:?}", data);
         match data {
-            Transition::AddNode { id, name, address, port } => {
-                self.shared_network_state.register_node(id, name, address, port);
+            Transition::AddNode { id, name, host, port } => {
+                self.shared_network_state.register_node(id, name, host, port);
             }
         }
     }

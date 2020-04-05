@@ -5,6 +5,8 @@ use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use reqwest::blocking::Body;
 use std::io::Cursor;
+use std::convert::TryInto;
+use reqwest::Url;
 
 pub struct AdminNetwork;
 
@@ -13,10 +15,10 @@ impl AdminNetwork {
         Self
     }
 
-    pub fn session_request(&mut self, msg: CreateSessionRequest) -> Result<CreateSessionResponse, ()> {
+    pub fn session_request(&mut self, url: Url, msg: CreateSessionRequest) -> Result<CreateSessionResponse, ()> {
         debug!("Handling CreateSessionRequest: {:?}", msg);
 
-        match self.post_to_uri(&format!("http://{}:{}/client/createSessionRequest", msg.dest_node.address, msg.dest_node.port), msg) {
+        match self.post_to_uri(url, msg) {
             Ok(resp) => Ok(resp),
             Err(err) => { 
                 error!("Error making session request: {:?}", err);
@@ -25,18 +27,15 @@ impl AdminNetwork {
         }
     }
 
-    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: &str, msg: S) -> Result<D, reqwest::Error> {
-        //let uri = format!("http://{}:{}{}", node.address, node.port, path);
+    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> Result<D, reqwest::Error> {
         debug!("POST to {}", uri); 
         debug!("Serializing: {:?}", msg);
 
         let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
         let body: Body = body_bytes.into();
 
-        let response_result = reqwest::blocking::Client::new().post(uri)
+        let response_result = reqwest::blocking::Client::new().post(uri.clone())
             .header("User-Agent", "Membership-Raft")
-            //.header("X-Node-Id", self.node_id)
-            //.header("X-Node-Port", self.webserver.port)
             .body(body)
             .send();
 

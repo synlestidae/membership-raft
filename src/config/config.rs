@@ -6,12 +6,13 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Config {
     pub name: String,
-    pub bootstrap_nodes: Vec<AppNode>,
-    pub node_id: Option<NodeId>,
-    pub webserver: WebserverConfig
+    pub bootstrap_hosts: Vec<String>,
+    pub webserver: WebserverConfig,
+    pub new_cluster: bool
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct WebserverConfig {
+    pub host: String,
     pub port: u16
 }

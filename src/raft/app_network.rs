@@ -15,6 +15,8 @@ use serde::de::DeserializeOwned;
 use serde::{Serialize};
 use std::fmt::Debug;
 use std::io::Cursor;
+use std::sync::mpsc::Sender;
+use crate::node::NodeEvent;
 
 
 /// Your application's network interface actor.
@@ -22,16 +24,16 @@ pub struct AppNetwork {
     shared_network_state: SharedNetworkState,
     node_id: NodeId,
     webserver: WebserverConfig,
-    pub app_raft_addr: Option<actix::Addr<crate::AppRaft>>
+    node_event_sender: Sender<NodeEvent>,
 }
 
 impl AppNetwork {
-    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId, webserver: &WebserverConfig/*, app_raft_addr: actix::Addr<crate::AppRaft>*/) -> Self {
+    pub fn new(shared_network_state: SharedNetworkState, node_id: NodeId, webserver: &WebserverConfig, node_event_sender: Sender<NodeEvent>) -> Self {
         Self {
             shared_network_state,
             node_id,
             webserver: webserver.clone(),
-            app_raft_addr: None
+            node_event_sender
         }
     }
 
@@ -40,7 +42,7 @@ impl AppNetwork {
 
         match node_option {
             Some(node) => {
-                let uri = format!("http://{}:{}{}", node.address, node.port, path);
+                let uri = format!("http://{}:{}{}", node.host, node.port, path);
                 debug!("Sending msg to node {} at {}", node_id, uri); 
                 debug!("Serializing: {:?}", msg);
 
@@ -130,16 +132,13 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
                     Ok(resp) => {
                         info!("AppendEntriesRequest response: {:?}", resp);
 
+
+                        drop(self.node_event_sender.send(NodeEvent::ok(&node)));
+
                         Box::new(result(Ok(resp)))
                     },
-                    Err(_) => { 
-                        use crate::futures::Future;
-                        if let Some(addr) = self.app_raft_addr {
-                            match addr.send(actix_raft::admin::ProposeConfigChange::new(vec![], vec![node.id])).wait() {
-                                Ok(_) => debug!("Successfully removed node {}", node.id),
-                                Err(err) => error!("Error removing node: {:?}", err)
-                            };
-                        }
+                    Err(err) => { 
+                        drop(self.node_event_sender.send(NodeEvent::err(&node, err)));
 
                         Box::new(result(Err(())))
                     }

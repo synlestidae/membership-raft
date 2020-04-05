@@ -9,7 +9,7 @@ use actix_raft;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Transition {
     // Your data variants go here.
-    AddNode { id: u64, name: String, address: std::net::IpAddr, port: u16 },
+    AddNode { id: u64, name: String, host: String, port: u16 },
 }
 
 impl actix_raft::AppData for Transition {

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
     pub new_node: AppNode,
-    pub dest_node: AppNode,
 }
 
 impl actix::Message for CreateSessionRequest {
