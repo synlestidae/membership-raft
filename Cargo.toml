@@ -28,8 +28,7 @@ version = "0.2.13"
 features = ["fs"]
 
 [dependencies.reqwest]
-version = "*"
-features = ["blocking"]
+version = "^0.9.24"
 
 [[bin]]
 name = "test"

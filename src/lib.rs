@@ -33,6 +33,7 @@ mod node;
 mod raft;
 mod rpc;
 mod startup;
+mod http_helper;
 
 /// The application's data response types.
 ///
@@ -52,6 +53,9 @@ pub fn main() {
     let opts: config::Opts = config::Opts::parse();
 
     info!("Opts: {:?}", opts);
+
+    //println!("POOP: {}", toml::to_string(&config::Config { name: String::from("poop"), bootstrap_hosts: vec![String::from("schneet")], ..Default::default() }).unwrap());
+    println!("POOP: \n{}", toml::Value::try_from(&config::Config { name: String::from("poop"), bootstrap_hosts: vec![String::from("schneet")], ..Default::default() }).unwrap());
 
     let node_config: config::Config = match opts.config { 
         Some(config_path) => {
@@ -93,7 +97,19 @@ pub fn main() {
 
     let bootstrap_hosts = node_config.bootstrap_hosts.clone();
 
-    let needs_to_join = node_config.new_cluster;// !node_config.node_id.is_some();
+    let needs_to_join = !node_config.new_cluster;
+
+    if needs_to_join {
+        if bootstrap_hosts.len() == 0 {
+            error!("Need at least one bootstrap host");
+
+            std::process::exit(1);
+        } else {
+            info!("Bootstrap hosts: {:?}", bootstrap_hosts);
+        }
+    } else {
+        info!("Going to start a new cluster");
+    }
 
     // Start off with just a single node in the cluster. Applications
     // should implement their own discovery system. See the cluster
@@ -149,7 +165,7 @@ pub fn main() {
 
     let mut admin_network = rpc::AdminNetwork::new();
 
-    std::thread::spawn(move || webserver.start());
+    std::thread::spawn(move || webserver.start(node_id));
 
     std::thread::spawn(move || {
         use std::collections::BTreeMap;
@@ -198,60 +214,48 @@ pub fn main() {
         }
     });
 
-    //std::thread::spawn(move || {
-        /*if needs_to_join {
-            std::thread::sleep(std::time::Duration::new(0, 1000));
-            info!("Asking for a new session");
-
-            let response_result = admin_network.session_request(rpc::CreateSessionRequest { 
-                new_node: node::AppNode {
-                    id: node_id,
-                    address: "127.0.0.1".parse().unwrap(),
-                    name: String::from("test-node"),
-                    port
-                },
-                dest_node: bootstrap_nodes[0].clone(),
-            }).unwrap();
-
-            info!("Response result: {:?}", response_result);
-        } else {
-            std::thread::sleep(std::time::Duration::new(1, 0));
-
-            info!("Starting cluster");
-
-            match app_raft_address.send(init_with_config).wait() {
-                Ok(r) => info!("Successfully added config: {:?}", r),
-                Err(err) => error!("Error adding config: {:?}", err)
-            };
-        }*/
-    //});
-
     info!("Starting up...");
 
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::new(2, 0));
-        
+
         let msg = if node_config.new_cluster {
             startup::StartupRequest::NewCluster { config: node_config, cluster_config: startup::ClusterConfig { } }
         } else {
             startup::StartupRequest::ExistingCluster { config: node_config }
         };
 
-        use crate::futures::Future;
+        use futures::future::Future;
 
-        let res = startup_addr.send(msg).wait();/*.map(|res| {
-            info!("Result of startup: {:?}", res)
-        });*/
-
-        match res {
+        match startup_addr.send(msg).wait() {
             Ok(res) => info!("Successfully started up: {:?}", res),
-            Err(err) => { 
+            Err(err) => {
                 error!("Failed to start up: {:?}", err);
 
-                std::process::exit(1);
+                std::process::exit(1)
             }
-        };
+        }
+
+        /*match sys.block_on(res) {
+            Ok(res) => ,
+            Err(err) => { 
+                ;
+            }
+        }*/
     });
+
+    //use crate::futures::Future;
+
+    /*let res = startup_addr.send(msg);
+
+    match sys.block_on(res) {
+        Ok(res) => info!("Successfully started up: {:?}", res),
+        Err(err) => { 
+            error!("Failed to start up: {:?}", err);
+
+            std::process::exit(1);
+        }
+    }*/
 
     match sys.run() {
         Err(err) => error!("Error in runtime: {:?}", err),

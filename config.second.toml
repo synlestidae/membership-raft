@@ -1,9 +1,8 @@
-[[bootstrap_nodes]] 
-id = 1 
-name = "main"
-address = "127.0.0.1"
-port = 5001
+bootstrap_hosts = ["localhost:5001"]
+name = "poop"
+new_cluster = false
 
 [webserver]
+host = "localhost"
 port = 5002
-name = "test-secondary"
+

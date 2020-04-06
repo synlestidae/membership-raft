@@ -10,13 +10,14 @@ use crate::config::WebserverConfig;
 use crate::node::SharedNetworkState;
 use crate::raft::Transition;
 use log::{debug, error, info};
-use reqwest::blocking::Body;
 use serde::de::DeserializeOwned;
 use serde::{Serialize};
 use std::fmt::Debug;
-use std::io::Cursor;
+use crate::futures::Future;
 use std::sync::mpsc::Sender;
 use crate::node::NodeEvent;
+use crate::http_helper::{HttpHelper, HttpFuture};
+use reqwest::Url;
 
 
 /// Your application's network interface actor.
@@ -25,6 +26,7 @@ pub struct AppNetwork {
     node_id: NodeId,
     webserver: WebserverConfig,
     node_event_sender: Sender<NodeEvent>,
+    http_helper: HttpHelper,
 }
 
 impl AppNetwork {
@@ -33,20 +35,24 @@ impl AppNetwork {
             shared_network_state,
             node_id,
             webserver: webserver.clone(),
-            node_event_sender
+            node_event_sender,
+            http_helper: HttpHelper::new()
         }
     }
 
-    fn post<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> Result<D, reqwest::Error> {//ResponseActFuture<A, R, reqwest::Error> {
+    fn post<'r, S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> HttpFuture<D, ()> {//ResponseActFuture<A, R, reqwest::Error> {
         let node_option = self.shared_network_state.get_node(node_id);
 
         match node_option {
             Some(node) => {
-                let uri = format!("http://{}:{}{}", node.host, node.port, path);
+                let uri = Url::parse(&format!("http://{}:{}{}", node.host, node.port, path)).unwrap();
+
                 debug!("Sending msg to node {} at {}", node_id, uri); 
                 debug!("Serializing: {:?}", msg);
 
-                let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
+                self.http_helper.post_to_uri(uri, msg)
+
+                /*let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
                 let body: Body = body_bytes.into();
 
                 let response_result = reqwest::blocking::Client::new().post(&uri)
@@ -71,9 +77,8 @@ impl AppNetwork {
 
                         Err(err)
                     }
-                };
-
-                return res;
+                };*/
+                //return res;
             },
             None => {
                 error!("Failed to get node with id {}", node_id);
@@ -87,7 +92,7 @@ impl AppNetwork {
 
         match node_option {
             Some(node) => {
-                return match self.post(node.id, msg, path) {
+                return match self.post(node.id, msg, path).wait() {
                     Ok(resp) => Box::new(result(Ok(resp))),
                     Err(err) => { 
                         error!("Error making request: {:?}", err);
@@ -128,7 +133,7 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
 
         match node_option {
             Some(node) => {
-                return match self.post(node.id, msg, "/rpc/appendEntriesRequest") {
+                return match self.post(node.id, msg, "/rpc/appendEntriesRequest").wait() {
                     Ok(resp) => {
                         info!("AppendEntriesRequest response: {:?}", resp);
 
@@ -138,7 +143,7 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
                         Box::new(result(Ok(resp)))
                     },
                     Err(err) => { 
-                        drop(self.node_event_sender.send(NodeEvent::err(&node, err)));
+                        drop(self.node_event_sender.send(NodeEvent::err(&node)));
 
                         Box::new(result(Err(())))
                     }

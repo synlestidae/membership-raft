@@ -18,7 +18,7 @@ impl NodeEvent {
         }
     }
 
-    pub fn err<E: Error + 'static>(node: &AppNode, _err: E) -> Self {
+    pub fn err(node: &AppNode) -> Self {
         Self {
             timestamp: Instant::now(),
             node: node.clone(),

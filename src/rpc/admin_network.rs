@@ -3,57 +3,68 @@ use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
-use reqwest::blocking::Body;
+use reqwest::r#async::{Client, Body};
 use std::io::Cursor;
 use std::convert::TryInto;
 use reqwest::Url;
+use crate::futures::Future;
+use crate::futures::Stream;
+use reqwest::r#async::Chunk;
 
-pub struct AdminNetwork;
+pub struct AdminNetwork { 
+    http_helper: crate::http_helper::HttpHelper
+}
+
+type AdminNetworkFut<E, R> = Box<dyn Future<Item=E, Error=R>>;
 
 impl AdminNetwork {
     pub fn new() -> Self {
-        Self
-    }
-
-    pub fn session_request(&mut self, url: Url, msg: CreateSessionRequest) -> Result<CreateSessionResponse, ()> {
-        debug!("Handling CreateSessionRequest: {:?}", msg);
-
-        match self.post_to_uri(url, msg) {
-            Ok(resp) => Ok(resp),
-            Err(err) => { 
-                error!("Error making session request: {:?}", err);
-                Err(())
-            }
+        Self {
+            http_helper: crate::http_helper::HttpHelper::new()
         }
     }
 
-    fn post_to_uri<'r, S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> Result<D, reqwest::Error> {
+    pub fn session_request(&mut self, url: Url, msg: CreateSessionRequest) -> AdminNetworkFut<CreateSessionResponse, ()> {
+        debug!("Handling CreateSessionRequest: {:?}", msg);
+
+        self.http_helper.post_to_uri::<CreateSessionRequest, CreateSessionResponse>(url, msg)
+    }
+
+    /*fn post_to_uri<S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> AdminNetworkFut<CreateSessionResponse, ()> {
         debug!("POST to {}", uri); 
         debug!("Serializing: {:?}", msg);
 
         let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
         let body: Body = body_bytes.into();
 
-        let response_result = reqwest::blocking::Client::new().post(uri.clone())
+        let response_result = Client::new().post(uri.clone())
             .header("User-Agent", "Membership-Raft")
             .body(body)
             .send();
 
-        match response_result {
-            Ok(resp) => {
-                let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
-                debug!("Deserializing {} bytes from {}", bytes.len(), uri);
+        response_result.then(|result| {
+            match result {
+                Ok(response) => {
+                    response.into_body()
+                        .collect()
+                        .map(|chunks : Vec<Chunk>| {
+                            let bytes: Vec<u8> = chunks.into_iter().map(|c| c.as_ref().to_vec()).flatten().collect();
 
-                let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
-                debug!("Deserialized: {:?}", response);
+                            debug!("Deserializing {} bytes", bytes.len());
 
-                Ok(response)
-            },
-            Err(err) => {
-                error!("Error in response: {:?}", err);
+                            let obj: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
 
-                Err(err)
+                            obj
+                        })
+                },
+                Err(_) => unimplemented!()
             }
-        }
-    }
+        }).map_err(|err| {
+            error!("Error in response: {:?}", err);
+
+            err
+        });
+
+        unimplemented!()
+    }*/
 }

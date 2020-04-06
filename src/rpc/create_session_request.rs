@@ -1,5 +1,6 @@
 use crate::node::AppNode;
 use serde::{Deserialize, Serialize};
+use actix_raft::NodeId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
@@ -14,5 +15,5 @@ impl actix::Message for CreateSessionRequest {
 pub enum CreateSessionResponse {
     Error,
     RedirectToLeader { leader_node : AppNode },
-    Success
+    Success { leader_node_id: NodeId }
 }

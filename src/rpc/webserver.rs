@@ -22,6 +22,7 @@ use rocket;
 use serde::{Serialize};
 use std::convert::From;
 use std::io::Read;
+use actix_raft::NodeId;
 
 pub struct WebServer {
     addr: Addr<AppRaft>,
@@ -51,6 +52,7 @@ impl<'r> Responder<'r> for WebServerError {
 
 #[derive(Clone)]
 struct PostHandler {
+    node_id: NodeId,
     addr: Addr<AppRaft>,
     shared_network: SharedNetworkState,
 }
@@ -227,7 +229,7 @@ impl PostHandler {
 
                 Ok(CreateSessionResponse::Error)
             },
-            Ok(_) => Ok(CreateSessionResponse::Success),
+            Ok(_) => Ok(CreateSessionResponse::Success { leader_node_id: self.node_id } ),
             Err(err) => { 
                 error!("Error with creating session: {:?}", err);
                 Ok(CreateSessionResponse::Error)
@@ -259,8 +261,9 @@ impl WebServer {
         }
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self, node_id: NodeId) {
         let post_handler = PostHandler {
+            node_id,
             addr: self.addr.clone(),
             shared_network: self.shared_network.clone()
         };
