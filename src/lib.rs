@@ -54,9 +54,6 @@ pub fn main() {
 
     info!("Opts: {:?}", opts);
 
-    //println!("POOP: {}", toml::to_string(&config::Config { name: String::from("poop"), bootstrap_hosts: vec![String::from("schneet")], ..Default::default() }).unwrap());
-    println!("POOP: \n{}", toml::Value::try_from(&config::Config { name: String::from("poop"), bootstrap_hosts: vec![String::from("schneet")], ..Default::default() }).unwrap());
-
     let node_config: config::Config = match opts.config { 
         Some(config_path) => {
             info!("Loading config from {}", config_path);
