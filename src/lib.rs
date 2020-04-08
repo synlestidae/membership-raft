@@ -25,6 +25,7 @@ use crate::clap::Clap;
 use log::{info, error};
 use std::sync::mpsc::channel;
 use actix::fut::result;
+use crate::futures::Future;
 
 mod error;
 mod config;
@@ -71,10 +72,7 @@ pub fn main() {
 
     let shared_network_state = node::SharedNetworkState::new();
 
-    /*for n in node_config.bootstrap_nodes.iter() {
-        info!("Bootstrap node: {:?}", n);
-        shared_network_state.register_node(n.id, &n.name, n.address, n.port);
-    }*/
+    let admin_api = rpc::AdminNetwork::new();
 
     // Build the actix system.
     let mut sys = actix::System::new("my-awesome-app");
@@ -96,7 +94,7 @@ pub fn main() {
 
     let needs_to_join = !node_config.new_cluster;
 
-    if needs_to_join {
+    let known_nodes = if needs_to_join {
         if bootstrap_hosts.len() == 0 {
             error!("Need at least one bootstrap host");
 
@@ -104,9 +102,22 @@ pub fn main() {
         } else {
             info!("Bootstrap hosts: {:?}", bootstrap_hosts);
         }
+
+        let mut nodes = vec![];
+        
+        for host in bootstrap_hosts {
+            info!("Getting members from {}", host);
+
+            let new_nodes = admin_api.get_nodes(format!("http://{}/client/nodes", host).parse().unwrap()).wait().unwrap();
+
+            nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
+        }
+
+        nodes
     } else {
         info!("Going to start a new cluster");
-    }
+        vec![]
+    };
 
     // Start off with just a single node in the cluster. Applications
     // should implement their own discovery system. See the cluster
@@ -154,11 +165,11 @@ pub fn main() {
 
     let raft_addr = app_raft_address.clone();
 
-    let startup = startup::StartupActor { node_id, raft_addr: raft_addr.clone(), admin_api: rpc::AdminNetwork::new() };
+    let startup = startup::StartupActor { node_id, raft_addr: raft_addr.clone(), admin_api };
 
     let startup_addr = startup.start();
 
-    let mut webserver = rpc::WebServer::new(port, app_raft_address.clone(), shared_network_state.clone());
+    let mut webserver = rpc::WebServer::new(port, app_raft_address.clone(), shared_network_state.clone(), node_id);
 
     let mut admin_network = rpc::AdminNetwork::new();
 

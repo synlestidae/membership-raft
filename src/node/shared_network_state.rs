@@ -45,4 +45,8 @@ impl SharedNetworkState {
     pub fn get_node(&mut self, id: u64) -> Option<AppNode> {
         self.nodes.lock().unwrap().iter().cloned().find(|n| n.id == id)
     }
+
+    pub fn get_nodes(&self) -> Vec<AppNode> {
+        self.nodes.lock().unwrap().iter().cloned().collect()
+    }
 }

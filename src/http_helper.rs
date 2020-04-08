@@ -18,6 +18,31 @@ impl HttpHelper {
         Self
     }
 
+    pub fn get<D: 'static + DeserializeOwned + Debug>(&self, uri: Url) -> HttpFuture<D, ()> {
+        Box::new(Client::new().post(uri.clone())
+            .header("User-Agent", "Membership-Raft")
+            .send()
+            .then(|result| match result {
+                Ok(response) => Box::new(response.into_body()
+                    .collect()
+                    .map(|chunks : Vec<Chunk>| {
+                        debug!("Deserializing from {} chunks", chunks.len());
+                        let bytes: Vec<u8> = chunks.into_iter().map(|c| c.as_ref().to_vec()).flatten().collect();
+
+                        debug!("Deserializing {} bytes", bytes.len());
+
+                        let obj: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
+
+                        obj
+                    })
+                    .map_err(|_| ())),
+                Err(err) => {
+                    unimplemented!("Error in response: {:?}", err)
+                    //Box::new(futures::future::err(()))
+                }
+            }))
+    }
+
     pub fn post_to_uri<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> HttpFuture<D, ()> {
         debug!("POST to {}", uri); 
         debug!("Serializing: {:?}", msg);
@@ -34,10 +59,12 @@ impl HttpHelper {
             response_result.then(|result| {
                 match result {
                     Ok(response) => {
+                        debug!("Received response: {:?}", response);
                         Box::new(
                             response.into_body()
                                 .collect()
                                 .map(|chunks : Vec<Chunk>| {
+                                    debug!("Deserializing from {} chunks", chunks.len());
                                     let bytes: Vec<u8> = chunks.into_iter().map(|c| c.as_ref().to_vec()).flatten().collect();
 
                                     debug!("Deserializing {} bytes", bytes.len());
@@ -51,6 +78,7 @@ impl HttpHelper {
                     },
                     Err(err) => {
                         error!("Error in HTTP request: {:?}", err);
+
                         Box::new(futures::future::err(())) as HttpFuture<D, ()>
                     }
                 }

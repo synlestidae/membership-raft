@@ -40,7 +40,7 @@ impl AppNetwork {
         }
     }
 
-    fn post<'r, S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> HttpFuture<D, ()> {//ResponseActFuture<A, R, reqwest::Error> {
+    fn post<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, msg: S, path: &str) -> HttpFuture<D, ()> {//ResponseActFuture<A, R, reqwest::Error> {
         let node_option = self.shared_network_state.get_node(node_id);
 
         match node_option {
@@ -87,18 +87,12 @@ impl AppNetwork {
         }
     }
 
-    fn handle_http<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, path: &str, msg: S) -> ResponseActFuture<Self, D, ()> {
+    fn handle_http<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&mut self, node_id: NodeId, path: &str, msg: S) ->  AppNetworkFut<D, ()> {
         let node_option = self.shared_network_state.get_node(node_id);
 
         match node_option {
             Some(node) => {
-                return match self.post(node.id, msg, path).wait() {
-                    Ok(resp) => Box::new(result(Ok(resp))),
-                    Err(err) => { 
-                        error!("Error making request: {:?}", err);
-                        Box::new(result(Err(())))
-                    }
-                };
+                Box::new(self.post(node.id, msg, path))
             },
             None => { 
                 error!("Unable to find node with id: {}", node_id );
@@ -117,10 +111,12 @@ impl Actor for AppNetwork {
 // Ensure you impl this over your application's data type. Here, it is `Data`.
 impl RaftNetwork<Transition> for AppNetwork {}
 
+type AppNetworkFut<E, R> = Box<dyn Future<Item=E, Error=R>>;
+
 // Then you just implement the various message handlers.
 // See the network chapter for details.
 impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
-    type Result = ResponseActFuture<Self, messages::AppendEntriesResponse, ()>;
+    type Result = AppNetworkFut<messages::AppendEntriesResponse, ()>;
 
     fn handle(
         &mut self,
@@ -131,26 +127,28 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
 
         info!("AppendEntriesRequest: {:?}", msg);
 
+        let node_event_sender = self.node_event_sender.clone();
+        let node_event_sender2 = self.node_event_sender.clone();
+
         match node_option {
             Some(node) => {
-                return match self.post(node.id, msg, "/rpc/appendEntriesRequest").wait() {
-                    Ok(resp) => {
+                let node2 = node.clone();
+                return Box::new(self.post(node.id, msg, "/rpc/appendEntriesRequest")
+                    .map(move |resp| {
                         info!("AppendEntriesRequest response: {:?}", resp);
 
+                        drop(node_event_sender.send(NodeEvent::ok(&node)));
 
-                        drop(self.node_event_sender.send(NodeEvent::ok(&node)));
+                        resp
+                    })
+                    .map_err(move |_| {
+                        drop(node_event_sender2.send(NodeEvent::err(&node2)));
 
-                        Box::new(result(Ok(resp)))
-                    },
-                    Err(err) => { 
-                        drop(self.node_event_sender.send(NodeEvent::err(&node)));
+                        ()
 
-                        Box::new(result(Err(())))
-                    }
-                };
-
-            },
-            None => panic!("Hang on, where do I send this thing?")//return Box::new(result(Err(())))
+                    }))
+                }
+            None => panic!("Hang on, where do I send this thing?")
         }
     }
 }
@@ -158,7 +156,7 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
 // Impl handlers on `AppNetwork` for the other `actix_raft::messages` message types.
 //
 impl Handler<InstallSnapshotRequest> for AppNetwork {
-    type Result = ResponseActFuture<Self, InstallSnapshotResponse, ()>;
+    type Result = AppNetworkFut<InstallSnapshotResponse, ()>;
 
     fn handle(&mut self, msg: InstallSnapshotRequest, _ctx: &mut Self::Context) -> Self::Result {
         self.handle_http(msg.target, "/rpc/installSnapshotRequest", msg)
@@ -168,7 +166,7 @@ impl Handler<InstallSnapshotRequest> for AppNetwork {
 // Impl handlers on `AppNetwork` for the other `actix_raft::messages` message types.
 //
 impl Handler<VoteRequest> for AppNetwork {
-    type Result = ResponseActFuture<Self, VoteResponse, ()>;
+    type Result = AppNetworkFut<VoteResponse, ()>;
 
     fn handle(&mut self, msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
         debug!("Handling VoteRequest: {:?}", msg);

@@ -10,6 +10,8 @@ use reqwest::Url;
 use crate::futures::Future;
 use crate::futures::Stream;
 use reqwest::r#async::Chunk;
+use crate::node::AppNode;
+use futures::future::ok;
 
 pub struct AdminNetwork { 
     http_helper: crate::http_helper::HttpHelper
@@ -22,6 +24,10 @@ impl AdminNetwork {
         Self {
             http_helper: crate::http_helper::HttpHelper::new()
         }
+    }
+
+    pub fn get_nodes(&self, url: Url) -> AdminNetworkFut<Vec<AppNode>, ()> {
+        self.http_helper.get(url)
     }
 
     pub fn session_request(&mut self, url: Url, msg: CreateSessionRequest) -> AdminNetworkFut<CreateSessionResponse, ()> {

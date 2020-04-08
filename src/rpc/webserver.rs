@@ -23,17 +23,22 @@ use serde::{Serialize};
 use std::convert::From;
 use std::io::Read;
 use actix_raft::NodeId;
+use futures::future::{ok, err};
 
 pub struct WebServer {
     addr: Addr<AppRaft>,
     shared_network: SharedNetworkState,
-    rocket_config: Config 
+    rocket_config: Config,
+    node_id: NodeId
 }
 
+#[derive(Debug)]
 pub struct WebServerError {
    pub error_message: String,
    pub status_code: u16
 }
+
+pub type WebserverFut<E, R> = Box<dyn Future<Item=E, Error=R>>;
 
 impl From<Box<bincode::ErrorKind>> for WebServerError {
     fn from(error: Box<bincode::ErrorKind>) -> Self {
@@ -83,14 +88,19 @@ impl Handler for PostHandler {
             result => debug!("Cannot get IP from request: {:?}", result)
         };
 
-        let result: Result<Vec<u8>, _> = match request.uri().path() {
-            "/client/createSessionRequest" => self.handle_create_session_request(buffer).map(serialize),
-            "/client/clientPayload" => self.handle_client_payload(buffer).map(serialize),
-            "/rpc/appendEntriesRequest" => self.handle_append_entries(buffer).map(serialize),
-            "/rpc/voteRequest" => self.handle_vote_request(buffer).map(serialize),
-            "/rpc/installSnapshotRequest" => self.handle_install_snapshot_request(buffer).map(serialize),
+        info!("Handling request, waiting for the result");
+
+        let result: Result<Vec<u8>, ()> = match request.uri().path() {
+            "/client/createSessionRequest" => Ok(serialize(self.handle_create_session_request(buffer).wait().unwrap())),
+            "/client/clientPayload" => Ok(serialize(self.handle_client_payload(buffer).wait().unwrap())),
+            "/client/nodes" => Ok(serialize(self.handle_get_nodes())),
+            "/rpc/appendEntriesRequest" => Ok(serialize(self.handle_append_entries(buffer).wait().unwrap())),
+            "/rpc/voteRequest" => Ok(serialize(self.handle_vote_request(buffer).wait().unwrap())),
+            "/rpc/installSnapshotRequest" => Ok(serialize(self.handle_install_snapshot_request(buffer).wait().unwrap())),
             path => unimplemented!("Unknown route: {}", path)
         };
+
+        info!("Result received");
 
         match result {
             Ok(bytes) => { 
@@ -122,80 +132,55 @@ use log::{debug, error, info};
 use actix_raft::admin;
 
 impl PostHandler {
-    fn handle_client_payload(&self, data: Vec<u8>) -> Result<messages::ClientPayloadResponse<crate::raft::DataResponse>, WebServerError> {
-        let payload: ClientPayload = bincode::deserialize(&data)?;
+    fn handle_client_payload(&self, data: Vec<u8>) -> WebserverFut<Result<messages::ClientPayloadResponse<crate::raft::DataResponse>, ()>, WebServerError> {
+        let payload: ClientPayload = bincode::deserialize(&data).unwrap();
 
-        let result = self.addr
+        Box::new(self.addr
             .send(messages::ClientPayload::new(messages::EntryNormal { data: payload.data }, messages::ResponseMode::Committed))
-            .wait();
+            .map(|result| result.map_err(|_| ()))
+            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 } ))
 
-        debug!("ClientPayloadResponse: {:?}", result);
-
-        match result {
-            Ok(Ok(result)) => Ok(result),
-            Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
-            Err(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
-        }
     }
 
-    fn handle_append_entries(&self, data: Vec<u8>) -> Result<messages::AppendEntriesResponse, WebServerError> {
+    fn handle_append_entries(&self, data: Vec<u8>) -> WebserverFut<Result<messages::AppendEntriesResponse, ()>, WebServerError> {
         debug!("Deserialising AppendEntriesRequest request of length {}", data.len());
 
-        let payload: messages::AppendEntriesRequest<crate::raft::Transition> = bincode::deserialize(&data)?;
+        let payload: messages::AppendEntriesRequest<crate::raft::Transition> = bincode::deserialize(&data).unwrap();
 
         debug!("Handling AppendEntriesRequest: {:?}", payload);
 
-        let result = self.addr.send(payload).wait();
-
-        debug!("AppendEntriesResponse: {:?}", result);
-
-        match result {
-            Ok(Ok(result)) => Ok(result),
-            Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
-            Err(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
-        }
+        Box::new(self.addr.send(payload)
+            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 }))
     }
 
-    fn handle_vote_request(&self, data: Vec<u8>) -> Result<messages::VoteResponse, WebServerError> {
+    fn handle_vote_request(&self, data: Vec<u8>) -> WebserverFut<Result<messages::VoteResponse, ()>, WebServerError> {
         debug!("Handling a vote of {} bytes", data.len());
-        let payload: messages::VoteRequest = bincode::deserialize(&data)?;
+        let payload: messages::VoteRequest = bincode::deserialize(&data).unwrap();
 
-        let result = self.addr.send(payload).wait();
+        debug!("VoteRequest: {:?}", payload);
 
-        debug!("VoteResponse: {:?}", result);
-
-        match result {
-            Ok(Ok(result)) => Ok(result),
-            Ok(err) => {
-                debug!("VoteResponse error: {:?}", err);
-
-                Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
-            },
-            Err(err) => { 
-                debug!("VoteResponse error: {:?}", err);
-
-                Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
-            }
-        }
+        Box::new(self.addr.send(payload)
+            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 })
+        )
     }
 
-    fn handle_install_snapshot_request(&self, data: Vec<u8>) -> Result<messages::InstallSnapshotResponse, WebServerError> {
-        let payload: messages::InstallSnapshotRequest = bincode::deserialize(&data)?;
+    fn handle_install_snapshot_request(&self, data: Vec<u8>) -> WebserverFut<Result<messages::InstallSnapshotResponse, ()>, WebServerError> {
+        let payload: messages::InstallSnapshotRequest = bincode::deserialize(&data).unwrap();
 
-        let result = self.addr.send(payload).wait();
+        debug!("InstallSnapshotResponse: {:?}", payload);
 
-        debug!("InstallSnapshotResponse: {:?}", result);
-
-        match result {
-            Ok(Ok(result)) => Ok(result),
-            Ok(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 }),
-            Err(err) => Err(WebServerError { error_message: format!("Error handling client payload: {:?}", err), status_code: 500 })
-        }
+        Box::new(self.addr.send(payload)
+            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 })
+        )
     }
 
-    fn handle_create_session_request(&self, data: Vec<u8>) -> Result<crate::rpc::CreateSessionResponse, WebServerError> {
+    fn handle_get_nodes(&self) -> Vec<crate::node::AppNode> {
+        self.shared_network.get_nodes()
+    }
+
+    fn handle_create_session_request(&self, data: Vec<u8>) -> WebserverFut<crate::rpc::CreateSessionResponse, WebServerError> {
         let mut shared_network = self.shared_network.clone();
-        let request: CreateSessionRequest = bincode::deserialize(&data)?;
+        let request: CreateSessionRequest = bincode::deserialize(&data).unwrap();
 
         let new_node = request.new_node;
 
@@ -212,47 +197,65 @@ impl PostHandler {
             } 
         };
 
-        let result = match self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])).wait()? {
-            Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
-                let leader_node_option = shared_network.get_node(node_id);
+        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
 
-                if let Some(leader_node) = leader_node_option {
-                    Ok(CreateSessionResponse::RedirectToLeader {
-                        leader_node 
-                    })
-                } else {
-                    Ok(CreateSessionResponse::Error)
-                }
-            },
-            Err(admin::ProposeConfigChangeError::NodeNotLeader(None)) => {
-                error!("Error with creating session: NO LEADER!");
-
-                Ok(CreateSessionResponse::Error)
-            },
-            Ok(_) => Ok(CreateSessionResponse::Success { leader_node_id: self.node_id } ),
-            Err(err) => { 
-                error!("Error with creating session: {:?}", err);
-                Ok(CreateSessionResponse::Error)
-            },
-        };
-
-        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Committed);
-
-        match self.addr.send(payload).wait()? {
-            Ok(_) => result,
-            Err(err) => {
+        let client_future = self.addr.send(payload)
+            .map(|r| r)
+            .map_err(|err| {
                 error!("Error sending ClientPayload: {:?}", err);
-                return Ok(CreateSessionResponse::Error);
-            }
-        }
+
+                unimplemented!("Error sending ClientPayload: {:?}", err)
+            });
+
+        let node_id = self.node_id;
+
+        Box::new(self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])) 
+            .map(move |result| {
+                match result {
+                    Ok(_) => CreateSessionResponse::Success { leader_node_id: node_id },
+                    Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
+                        let leader_node_option = shared_network.get_node(node_id);
+
+                        if let Some(leader_node) = leader_node_option {
+                            error!("Redirecting client to leader");
+                            CreateSessionResponse::RedirectToLeader {
+                                leader_node 
+                            }
+                        } else {
+                            error!("Cannot find info for leader node");
+                            CreateSessionResponse::Error
+                        }
+                    },
+                    Err(admin::ProposeConfigChangeError::NodeNotLeader(None)) => {
+                        error!("Error with creating session: NO LEADER!");
+
+                        CreateSessionResponse::Error
+                    },
+                    Err(e) => {
+                        error!("Error with creating session: {:?}", e);
+
+                        CreateSessionResponse::Error
+                    },
+                }
+            })
+            .then(|res| match res {
+                Err(e) => unimplemented!(),
+                Ok(CreateSessionResponse::Success { leader_node_id }) => {
+                    return Box::new(client_future
+                        .map(move |_| CreateSessionResponse::Success { leader_node_id })
+                        .map_err(|_| unimplemented!()))
+                },
+                Ok(e) => unimplemented!()
+            }))
     }
 }
 
 impl WebServer {
-    pub(crate) fn new(port: u16, addr: Addr<AppRaft>, shared_network_state: SharedNetworkState) -> Self {
+    pub(crate) fn new(port: u16, addr: Addr<AppRaft>, shared_network_state: SharedNetworkState, node_id: NodeId) -> Self {
         Self {
             addr,
             shared_network: shared_network_state,
+            node_id,
             rocket_config: ConfigBuilder::new(Environment::Staging)
                 .address("0.0.0.0")
                 .port(port)
