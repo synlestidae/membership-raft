@@ -68,9 +68,18 @@ pub fn main() {
         }
     };
 
+    let node_id = rand::random();
+
     info!("Node config: {:?}", node_config);
 
     let shared_network_state = node::SharedNetworkState::new();
+
+    shared_network_state.register_node(
+        node_id,
+        node_config.name.clone(),
+        node_config.webserver.host.clone(),
+        node_config.webserver.port
+    );
 
     let admin_api = rpc::AdminNetwork::new();
 
@@ -81,7 +90,6 @@ pub fn main() {
     // snapshots will be stored. See the storage chapter for more details.
     let config = RaftConfig::build(String::from("./snapshots")).validate().unwrap();
 
-    let node_id = rand::random();
     /* match (opts.node_id, node_config.node_id) {
         (Some(n), _) => n,
         (_, Some(n)) => n,
@@ -108,7 +116,11 @@ pub fn main() {
         for host in bootstrap_hosts {
             info!("Getting members from {}", host);
 
-            let new_nodes = admin_api.get_nodes(format!("http://{}/client/nodes", host).parse().unwrap()).wait().unwrap();
+            let new_nodes = admin_api.get_nodes(format!("http://{}/client/nodes", host).parse().unwrap()).unwrap();
+
+            for n in new_nodes.iter() {
+                shared_network_state.register_node(n.id, n.name.clone(), n.host.clone(), n.port);
+            }
 
             nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
         }
@@ -128,22 +140,24 @@ pub fn main() {
         vec![node_id] 
     }; 
 
+    for n in known_nodes {
+        members.push(n);
+    }
+
     /*for node in node_config.bootstrap_nodes.iter() {
         members.push(node.id);
     }*/
 
-    let non_voters = vec![];/*if needs_to_join {
-        vec![node_id]
-    } else {
-        vec![]
-    };*/
+    let non_voters = vec![];
 
     let membership: messages::MembershipConfig = messages::MembershipConfig {
-        is_in_joint_consensus: true,
+        is_in_joint_consensus: false,
         members: members.clone(),
         non_voters: non_voters,
         removing: vec![],
     };
+
+    info!("Existing members: {:?}", members);
 
     let init_with_config = admin::InitWithConfig {
         members: vec![node_id]
@@ -224,46 +238,35 @@ pub fn main() {
 
     info!("Starting up...");
 
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::new(2, 0));
-
+    let startup_fut = {
         let msg = if node_config.new_cluster {
             startup::StartupRequest::NewCluster { config: node_config, cluster_config: startup::ClusterConfig { } }
         } else {
             startup::StartupRequest::ExistingCluster { config: node_config }
         };
 
-        use futures::future::Future;
-
-        match startup_addr.send(msg).wait() {
+        startup_addr.send(msg)/* {
             Ok(res) => info!("Successfully started up: {:?}", res),
             Err(err) => {
                 error!("Failed to start up: {:?}", err);
 
                 std::process::exit(1)
             }
-        }
-
-        /*match sys.block_on(res) {
-            Ok(res) => ,
-            Err(err) => { 
-                ;
-            }
         }*/
-    });
+    };
 
     //use crate::futures::Future;
 
-    /*let res = startup_addr.send(msg);
+    /*let res = startup_addr.send(msg);*/
 
-    match sys.block_on(res) {
+    match sys.block_on(startup_fut) {
         Ok(res) => info!("Successfully started up: {:?}", res),
         Err(err) => { 
             error!("Failed to start up: {:?}", err);
 
             std::process::exit(1);
         }
-    }*/
+    }
 
     match sys.run() {
         Err(err) => error!("Error in runtime: {:?}", err),

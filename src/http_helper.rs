@@ -8,6 +8,7 @@ use reqwest::Url;
 use crate::futures::Future;
 use crate::futures::Stream;
 use reqwest::r#async::Chunk;
+use reqwest::Client as BlockingClient;
 
 pub type HttpFuture<E, R> = Box<dyn Future<Item=E, Error=R>>;
 
@@ -18,8 +19,22 @@ impl HttpHelper {
         Self
     }
 
-    pub fn get<D: 'static + DeserializeOwned + Debug>(&self, uri: Url) -> HttpFuture<D, ()> {
-        Box::new(Client::new().post(uri.clone())
+    pub fn get<D: 'static + DeserializeOwned + Debug>(&self, url: Url) -> Result<D, ()> {
+        match reqwest::get(url) { // .unwrap().json().map_err(|_| ())
+            Ok(mut resp) => {
+                let mut buf: Vec<u8> = vec![];
+                resp.copy_to(&mut buf).map_err(|_| ())?;
+                match bincode::deserialize(&buf) {
+                    Ok(data) => Ok(data),
+                    Err(_) => Err(())
+                }
+            },
+            Err(err) => {
+                error!("Error in GET request: {:?}", err);
+                return Err(())
+            }
+        }
+        /*Box::new(Client::new().post(uri.clone())
             .header("User-Agent", "Membership-Raft")
             .send()
             .then(|result| match result {
@@ -40,7 +55,7 @@ impl HttpHelper {
                     unimplemented!("Error in response: {:?}", err)
                     //Box::new(futures::future::err(()))
                 }
-            }))
+            }))*/
     }
 
     pub fn post_to_uri<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> HttpFuture<D, ()> {

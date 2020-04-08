@@ -26,7 +26,7 @@ impl AdminNetwork {
         }
     }
 
-    pub fn get_nodes(&self, url: Url) -> AdminNetworkFut<Vec<AppNode>, ()> {
+    pub fn get_nodes(&self, url: Url) -> Result<Vec<AppNode>, ()> {
         self.http_helper.get(url)
     }
 

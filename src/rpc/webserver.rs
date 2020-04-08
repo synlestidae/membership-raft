@@ -95,7 +95,11 @@ impl Handler for PostHandler {
             "/client/clientPayload" => Ok(serialize(self.handle_client_payload(buffer).wait().unwrap())),
             "/client/nodes" => Ok(serialize(self.handle_get_nodes())),
             "/rpc/appendEntriesRequest" => Ok(serialize(self.handle_append_entries(buffer).wait().unwrap())),
-            "/rpc/voteRequest" => Ok(serialize(self.handle_vote_request(buffer).wait().unwrap())),
+            "/rpc/voteRequest" => {
+                let response: messages::VoteResponse = self.handle_vote_request(buffer).wait().unwrap().unwrap();
+
+                Ok(serialize(response))
+            },
             "/rpc/installSnapshotRequest" => Ok(serialize(self.handle_install_snapshot_request(buffer).wait().unwrap())),
             path => unimplemented!("Unknown route: {}", path)
         };
@@ -175,6 +179,7 @@ impl PostHandler {
     }
 
     fn handle_get_nodes(&self) -> Vec<crate::node::AppNode> {
+        debug!("Getting nodes");
         self.shared_network.get_nodes()
     }
 
@@ -276,6 +281,7 @@ impl WebServer {
         let vote_request_route = Route::new(Method::Post, "/rpc/voteRequest", post_handler.clone());
         let install_snapshot_route = Route::new(Method::Post, "/rpc/installSnapshotRequest", post_handler.clone());
         let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler.clone());
+        let get_nodes = Route::new(Method::Get, "/client/nodes", post_handler.clone());
         let admin_metrics = Route::new(Method::Post, "/admin/metrics", post_handler);
 
         let rocket = rocket::custom(self.rocket_config.clone())
@@ -285,7 +291,8 @@ impl WebServer {
             vote_request_route,
             install_snapshot_route,
             create_session_request,
-            admin_metrics 
+            admin_metrics,
+            get_nodes
         ]);
 
         rocket.launch();

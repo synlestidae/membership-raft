@@ -13,7 +13,8 @@ use log::{debug, error, info};
 use serde::de::DeserializeOwned;
 use serde::{Serialize};
 use std::fmt::Debug;
-use crate::futures::Future;
+use futures::Future;
+use futures::future::err;
 use std::sync::mpsc::Sender;
 use crate::node::NodeEvent;
 use crate::http_helper::{HttpHelper, HttpFuture};
@@ -96,7 +97,8 @@ impl AppNetwork {
             },
             None => { 
                 error!("Unable to find node with id: {}", node_id );
-                panic!("Not gonna happen");
+                //panic!("Not gonna happen");
+                Box::new(err(()))
             }
         }
     }
@@ -171,6 +173,6 @@ impl Handler<VoteRequest> for AppNetwork {
     fn handle(&mut self, msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
         debug!("Handling VoteRequest: {:?}", msg);
 
-        self.handle_http(msg.target, "/rpc/voteRequest", msg)
+        self.handle_http::<VoteRequest, VoteResponse>(msg.target, "/rpc/voteRequest", msg)
     }
 }
