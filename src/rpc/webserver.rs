@@ -84,6 +84,8 @@ impl Handler for PostHandler {
     fn handle<'r>(&self, request: &'r Request, data: RocketData) -> Outcome<'r> {
         let mut buffer = Vec::new();
 
+        // TODO move this code into a Result method so I can use ?
+
         match data.open().read_to_end(&mut buffer) {
             Ok(_) => {}
             Err(err) => return Outcome::failure(Status::InternalServerError),
