@@ -15,6 +15,7 @@ extern crate futures_util;
 extern crate reqwest;
 extern crate futures;
 extern crate tarpc;
+extern crate serde_json;
 
 use actix_raft::Raft;
 use actix_raft::admin;

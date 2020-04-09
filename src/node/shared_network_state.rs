@@ -42,7 +42,7 @@ impl SharedNetworkState {
         });
     }
 
-    pub fn get_node(&mut self, id: u64) -> Option<AppNode> {
+    pub fn get_node(&self, id: u64) -> Option<AppNode> {
         self.nodes.lock().unwrap().iter().cloned().find(|n| n.id == id)
     }
 

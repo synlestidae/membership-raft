@@ -1648,6 +1648,7 @@ dependencies = [
  "rocket",
  "rocket_contrib",
  "serde",
+ "serde_json",
  "simple_logger",
  "tarpc",
  "tokio 0.2.13",

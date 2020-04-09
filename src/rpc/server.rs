@@ -1,4 +1,4 @@
-use crate::AppRaft;
+/*use crate::AppRaft;
 use actix::Addr;
 use crate::rpc::Rpc;
 use actix_raft::messages;
@@ -39,4 +39,4 @@ impl Rpc for Server {
     fn send_client_payload(self, _: tarpc::context::Context, msg: messages::AppendEntriesRequest<Transition>) -> Self::SendClientPayloadFut {
         RpcFuture { request: self.addr.send(msg) }
     }
-}
+}*/

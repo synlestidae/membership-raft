@@ -4,10 +4,19 @@ use futures::future::Future;
 use crate::node::AppNode;
 use actix_raft::messages;
 use actix_raft;
+use log::error;
 
 pub enum RpcError {
     Request,
     StatusCode,
+}
+
+impl From<reqwest::Error> for RpcError {
+    fn from(err: reqwest::Error) -> Self {
+        error!("RpcError: {:?}", err);
+
+        RpcError::Request
+    }
 }
 
 pub trait RpcClient {
@@ -17,7 +26,7 @@ pub trait RpcClient {
     type VoteFut: Future<Item=messages::VoteResponse, Error=RpcError>;
     type InstallSnapshotFut: Future<Item=messages::InstallSnapshotResponse, Error=RpcError>;
 
-    fn join_cluster(&self, url: &Url, msg: CreateSessionRequest) -> Self::JoinClusterFut;
+    fn join_cluster(&self, url: &Url, req: CreateSessionRequest) -> Self::JoinClusterFut;
 
     fn get_nodes(&self, url: &Url) -> Self::JoinClusterFut;
 

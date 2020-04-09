@@ -6,6 +6,7 @@ use crate::AppRaft;
 use crate::node::SharedNetworkState;
 use crate::raft::ClientPayload;
 use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
+use crate::rpc::RpcRequest;
 use rocket::Data as RocketData;
 use rocket::Handler;
 use rocket::Request;
@@ -24,6 +25,8 @@ use std::convert::From;
 use std::io::Read;
 use actix_raft::NodeId;
 use futures::future::{ok, err};
+use serde_json::Value;
+use serde_json::{from_slice};
 
 pub struct WebServer {
     addr: Addr<AppRaft>,
@@ -71,57 +74,40 @@ use std::io::Cursor;
 impl Handler for PostHandler {
     fn handle<'r>(&self, request: &'r Request, data: RocketData) -> Outcome<'r> {
         let mut buffer = Vec::new();
-        data.open().read_to_end(&mut buffer).unwrap();
 
-        let node_id = request.headers().get_one("x-node-id");
-        let node_port = request.headers().get_one("x-node-port");
-
-        match (request.remote(), node_id, node_port) {
-            (Some(ip), Some(ref id_string), Some(ref port_string)) => {
-                let node_id = id_string.parse::<u64>().unwrap();
-                let node_port = port_string.parse::<u16>().unwrap();
-
-                debug!("Register node {} with IP {} and port {}", node_id, ip, node_port);
-
-                //self.shared_network.register_node(node_id, "remote-node", ip.ip(), ip.port());
-            },
-            result => debug!("Cannot get IP from request: {:?}", result)
-        };
-
-        info!("Handling request, waiting for the result");
-
-        let result: Result<Vec<u8>, ()> = match request.uri().path() {
-            "/client/createSessionRequest" => Ok(serialize(self.handle_create_session_request(buffer).wait().unwrap())),
-            "/client/clientPayload" => Ok(serialize(self.handle_client_payload(buffer).wait().unwrap())),
-            "/client/nodes" => Ok(serialize(self.handle_get_nodes())),
-            "/rpc/appendEntriesRequest" => Ok(serialize(self.handle_append_entries(buffer).wait().unwrap())),
-            "/rpc/voteRequest" => {
-                let response: messages::VoteResponse = self.handle_vote_request(buffer).wait().unwrap().unwrap();
-
-                Ok(serialize(response))
-            },
-            "/rpc/installSnapshotRequest" => Ok(serialize(self.handle_install_snapshot_request(buffer).wait().unwrap())),
-            path => unimplemented!("Unknown route: {}", path)
-        };
-
-        info!("Result received");
-
-        match result {
-            Ok(bytes) => { 
-                let response = Response::build()
-                    .status(Status::Ok)
-                    .header(ContentType::new("application", "octet-stream"))
-                    .raw_header("X-Teapot-Make", "Rocket")
-                    .raw_header("X-Teapot-Model", "Utopia")
-                    .raw_header_adjoin("X-Teapot-Model", "Series 1")
-                    .sized_body(Cursor::new(bytes))
-                    .finalize();
-                
-                Outcome::Success(response) 
-            
-            },
-            Err(_) => Outcome::Failure(Status::InternalServerError)
+        match data.open().read_to_end(&mut buffer) {
+            Ok(_) => {},
+            Err(err) => return Outcome::failure(Status::InternalServerError)
         }
+
+        let request = match serde_json::from_slice(&buffer) {
+            Ok(o) => o,
+            Err(err) => return Outcome::failure(Status::BadRequest),
+        };
+
+        let value = match self.handle_request(request) {
+            Ok(v) => v,
+            Err(err) => return Outcome::failure(Status::InternalServerError)
+        };
+
+        let value_bytes = match serde_json::to_vec(&value) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                error!("Error serializing response: {:?}", err);
+
+                return Outcome::failure(Status::InternalServerError);
+            }
+        };
+
+        let response = Response::build()
+            .status(Status::Ok)
+            .header(ContentType::new("application", "json"))
+            .raw_header("X-Node-Id", self.node_id.to_string())
+            .raw_header("Server", "Membership")
+            .sized_body(Cursor::new(value_bytes))
+            .finalize();
+        
+        Outcome::Success(response) 
     }
 
 }
@@ -134,9 +120,86 @@ impl From<actix::MailboxError> for WebServerError {
 
 use log::{debug, error, info};
 use actix_raft::admin;
+use actix_raft;
 
 impl PostHandler {
-    fn handle_client_payload(&self, data: Vec<u8>) -> WebserverFut<Result<messages::ClientPayloadResponse<crate::raft::DataResponse>, ()>, WebServerError> {
+    fn handle_request<'r>(&self, object: RpcRequest) -> Result<serde_json::Value, WebServerError> {
+        let value: serde_json::Value = match object {
+            RpcRequest::JoinCluster(request) => {
+                let new_node = request.new_node;
+
+                info!("New node: {:?}", new_node);
+
+                self.shared_network.register_node(new_node.id, &new_node.name, new_node.host.clone(), new_node.port);
+
+                let entry = messages::EntryNormal { 
+                    data: crate::raft::Transition::AddNode { 
+                        id: new_node.id,
+                        name: new_node.name,
+                        host: new_node.host,
+                        port: new_node.port 
+                    } 
+                };
+                let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
+                self.addr.send(payload).wait().unwrap();
+
+                let proposal_result = self.addr
+                    .send(admin::ProposeConfigChange::new(vec![new_node.id], vec![]))
+                    .wait()
+                    .unwrap();
+                
+                match serde_json::to_value(match proposal_result {
+                    Ok(()) => CreateSessionResponse::Success { leader_node_id: self.node_id },
+                    Err(actix_raft::admin::ProposeConfigChangeError::Noop) => CreateSessionResponse::Success { leader_node_id: self.node_id },
+                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(None)) => CreateSessionResponse::Error,
+                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(Some(leader_node_id))) => {
+                        if let Some(leader_node) = self.shared_network.get_node(leader_node_id) {
+                            CreateSessionResponse::RedirectToLeader { leader_node }
+                        } else {
+                            CreateSessionResponse::Error
+                        }
+                    },
+                    Err(actix_raft::admin::ProposeConfigChangeError::Internal) => return Err(
+                        WebServerError { 
+                            error_message: format!("Error handling client payload"), 
+                            status_code: 500 
+                        }
+                    ),
+                    Err(e) => {
+                        error!("Error with creating session: {:?}", e);
+
+                        CreateSessionResponse::Error
+                    },
+                }) {
+                    Ok(r) => r,
+                    Err(err) => {
+                        error!("Error in converting value to JSON: {:?}", err);
+                        
+                        return Err(WebServerError { 
+                            error_message: format!("Error handling client payload"), 
+                            status_code: 500 
+                        });
+                    }
+                }
+            },
+            RpcRequest::GetNodes => unimplemented!(),
+            RpcRequest::AppendEntries(append_entries_request) => unimplemented!(),
+            RpcRequest::Vote(vote_request) => unimplemented!(),
+            RpcRequest::InstallSnapshot(install_snapshot_request) => unimplemented!()
+        };
+
+        Ok(value)
+
+        /*let value_bytes = match serde_json::to_vec(&value) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                error!("Error serializing response: {:?}", err);
+
+                return Outcome::failure(Status::InternalServerError);
+            }
+        };*/
+    }
+    /*fn handle_client_payload(&self, data: Vec<u8>) -> WebserverFut<Value, ()> {
         let payload: ClientPayload = bincode::deserialize(&data).unwrap();
 
         Box::new(self.addr
@@ -252,7 +315,7 @@ impl PostHandler {
                 },
                 Ok(e) => unimplemented!()
             }))
-    }
+    }*/
 }
 
 impl WebServer {
@@ -276,24 +339,10 @@ impl WebServer {
             shared_network: self.shared_network.clone()
         };
 
-        let post_client_payload_route = Route::new(Method::Post, "/client/clientPayload", post_handler.clone());
-        let append_entries_route = Route::new(Method::Post, "/rpc/appendEntriesRequest", post_handler.clone());
-        let vote_request_route = Route::new(Method::Post, "/rpc/voteRequest", post_handler.clone());
-        let install_snapshot_route = Route::new(Method::Post, "/rpc/installSnapshotRequest", post_handler.clone());
-        let create_session_request = Route::new(Method::Post, "/client/createSessionRequest", post_handler.clone());
-        let get_nodes = Route::new(Method::Get, "/client/nodes", post_handler.clone());
-        let admin_metrics = Route::new(Method::Post, "/admin/metrics", post_handler);
+        let route = Route::new(Method::Post, "/rpc", post_handler);
 
         let rocket = rocket::custom(self.rocket_config.clone())
-            .mount("/", vec![
-            post_client_payload_route,
-            append_entries_route,
-            vote_request_route,
-            install_snapshot_route,
-            create_session_request,
-            admin_metrics,
-            get_nodes
-        ]);
+            .mount("/", vec![route]);
 
         rocket.launch();
     }
