@@ -52,6 +52,15 @@ impl From<Box<bincode::ErrorKind>> for WebServerError {
     }
 }
 
+impl From<serde_json::Error> for WebServerError {
+    fn from(error: serde_json::Error) -> Self {
+        Self {
+            error_message: format!("Error deserialising data: {}", error),
+            status_code: 400
+        }
+    }
+}
+
 impl<'r> Responder<'r> for WebServerError {
     fn respond_to(self, _request: &Request) -> response::Result<'r> {
         Err(Status::InternalServerError)
@@ -148,7 +157,7 @@ impl PostHandler {
                     .wait()
                     .unwrap();
                 
-                match serde_json::to_value(match proposal_result {
+                serde_json::to_value(match proposal_result {
                     Ok(()) => CreateSessionResponse::Success { leader_node_id: self.node_id },
                     Err(actix_raft::admin::ProposeConfigChangeError::Noop) => CreateSessionResponse::Success { leader_node_id: self.node_id },
                     Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(None)) => CreateSessionResponse::Error,
@@ -170,17 +179,7 @@ impl PostHandler {
 
                         CreateSessionResponse::Error
                     },
-                }) {
-                    Ok(r) => r,
-                    Err(err) => {
-                        error!("Error in converting value to JSON: {:?}", err);
-                        
-                        return Err(WebServerError { 
-                            error_message: format!("Error handling client payload"), 
-                            status_code: 500 
-                        });
-                    }
-                }
+                })?
             },
             RpcRequest::GetNodes => unimplemented!(),
             RpcRequest::AppendEntries(append_entries_request) => unimplemented!(),
