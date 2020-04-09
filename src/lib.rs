@@ -238,35 +238,37 @@ pub fn main() {
 
     info!("Starting up...");
 
-    let startup_fut = {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::new(5, 0));
+
         let msg = if node_config.new_cluster {
             startup::StartupRequest::NewCluster { config: node_config, cluster_config: startup::ClusterConfig { } }
         } else {
             startup::StartupRequest::ExistingCluster { config: node_config }
         };
 
-        startup_addr.send(msg)/* {
+        match startup_addr.send(msg).wait() {
             Ok(res) => info!("Successfully started up: {:?}", res),
             Err(err) => {
                 error!("Failed to start up: {:?}", err);
 
                 std::process::exit(1)
             }
-        }*/
-    };
+        }
+    });
 
     //use crate::futures::Future;
 
     /*let res = startup_addr.send(msg);*/
 
-    match sys.block_on(startup_fut) {
+    /*match sys.block_on(startup_fut) {
         Ok(res) => info!("Successfully started up: {:?}", res),
         Err(err) => { 
             error!("Failed to start up: {:?}", err);
 
             std::process::exit(1);
         }
-    }
+    }*/
 
     match sys.run() {
         Err(err) => error!("Error in runtime: {:?}", err),
