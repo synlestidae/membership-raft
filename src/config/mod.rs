@@ -1,5 +1,5 @@
-mod opts;
 mod config;
+mod opts;
 
-pub use opts::Opts;
 pub use config::{Config, WebserverConfig};
+pub use opts::Opts;

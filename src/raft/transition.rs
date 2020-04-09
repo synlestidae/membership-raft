@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use actix_raft;
+use serde::{Deserialize, Serialize};
 
 /// The application's data type.
 ///
@@ -9,8 +9,12 @@ use actix_raft;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Transition {
     // Your data variants go here.
-    AddNode { id: u64, name: String, host: String, port: u16 },
+    AddNode {
+        id: u64,
+        name: String,
+        host: String,
+        port: u16,
+    },
 }
 
-impl actix_raft::AppData for Transition {
-}
+impl actix_raft::AppData for Transition {}

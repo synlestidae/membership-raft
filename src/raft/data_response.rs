@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
 use actix_raft;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DataResponse {
     // Your response variants go here.
-    Success { msg: String }
+    Success { msg: String },
 }
 
 impl DataResponse {

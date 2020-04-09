@@ -1,6 +1,6 @@
 use crate::node::AppNode;
-use std::time::Instant;
 use std::error::Error;
+use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct NodeEvent {
@@ -14,7 +14,7 @@ impl NodeEvent {
         Self {
             timestamp: Instant::now(),
             node: node.clone(),
-            event_type: NodeEventType::Ok
+            event_type: NodeEventType::Ok,
         }
     }
 
@@ -22,7 +22,7 @@ impl NodeEvent {
         Self {
             timestamp: Instant::now(),
             node: node.clone(),
-            event_type: NodeEventType::Err
+            event_type: NodeEventType::Err,
         }
     }
 }
@@ -30,5 +30,5 @@ impl NodeEvent {
 #[derive(Clone, Debug)]
 pub enum NodeEventType {
     Ok,
-    Err//(Box<dyn Error + Clone + std::fmt::Debug>)
+    Err, //(Box<dyn Error + Clone + std::fmt::Debug>)
 }

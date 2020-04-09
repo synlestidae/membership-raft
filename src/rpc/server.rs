@@ -14,15 +14,15 @@ pub struct Server {
 }
 
 #[allow(dead_code)]
-pub struct RpcFuture<A, M: Message + std::marker::Send> where 
+pub struct RpcFuture<A, M: Message + std::marker::Send> where
     <M as actix::Message>::Result: std::marker::Send,
     A: Handler<M>,
     A::Context: ToEnvelope<A, M>,
-{ 
+{
     request: Request<A, M>
 }
 
-impl<A, M: Message + std::marker::Send> std::future::Future for RpcFuture<A, M> where 
+impl<A, M: Message + std::marker::Send> std::future::Future for RpcFuture<A, M> where
     <M as actix::Message>::Result: Send,
     A::Context: ToEnvelope<A, M>,
     A: Handler<M> {

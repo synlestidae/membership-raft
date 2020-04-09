@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
 use crate::node::AppNode;
+use serde::{Deserialize, Serialize};
 //use crate::raft::Transition;
 
 #[derive(Deserialize, Serialize)]
 pub struct AppState {
-    nodes: Vec<AppNode>
+    nodes: Vec<AppNode>,
 }
 
 impl AppState {
@@ -12,7 +12,7 @@ impl AppState {
         match transition {
             Transition::AddNode { id, name, address, port } => self.nodes.push(AppNode {
                 id,
-                name, 
+                name,
                 address,
                 port
             })

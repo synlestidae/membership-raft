@@ -3,5 +3,5 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientPayload {
-    pub data: Transition
+    pub data: Transition,
 }

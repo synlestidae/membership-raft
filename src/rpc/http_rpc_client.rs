@@ -1,37 +1,42 @@
-use crate::rpc::{RpcClient, RpcError};
-use futures::future::Future;
 use crate::node::AppNode;
-use actix_raft::messages;
 use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
-use reqwest::Url;
-use serde_json::{from_slice, to_vec};
+use crate::rpc::{RpcClient, RpcError};
+use actix_raft::messages;
+use futures::future::Future;
 use reqwest::r#async::Client;
-use serde::{Serialize, Deserialize};
+use reqwest::Url;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{from_slice, to_vec};
 
 pub struct HttpRpcClient {
-    client: Client
+    client: Client,
 }
 
 impl HttpRpcClient {
     pub fn new() -> Self {
         Self {
-            client: Client::new()
+            client: Client::new(),
         }
     }
 
-    fn post<'r, T: DeserializeOwned + 'static>(&self, url: &Url, request: &RpcRequest) -> HttpFut<T> {
-        Box::new(self.client
-            .post(url.clone())
-            .json(request)
-            .send()
-            .and_then(|mut res| res.json())
-            .map_err(|err| RpcError::from(err))
-         )
+    fn post<'r, T: DeserializeOwned + 'static>(
+        &self,
+        url: &Url,
+        request: &RpcRequest,
+    ) -> HttpFut<T> {
+        Box::new(
+            self.client
+                .post(url.clone())
+                .json(request)
+                .send()
+                .and_then(|mut res| res.json())
+                .map_err(|err| RpcError::from(err)),
+        )
     }
 }
 
-pub type HttpFut<T> = Box<dyn Future<Item=T, Error=RpcError>>;
+pub type HttpFut<T> = Box<dyn Future<Item = T, Error = RpcError>>;
 
 impl RpcClient for HttpRpcClient {
     type JoinClusterFut = HttpFut<CreateSessionResponse>;
@@ -48,7 +53,11 @@ impl RpcClient for HttpRpcClient {
         self.post(url, &RpcRequest::GetNodes)
     }
 
-    fn append_entries(&self, url: &Url, msg: messages::AppendEntriesRequest<crate::raft::Transition>) -> Self::AppendEntriesFut {
+    fn append_entries(
+        &self,
+        url: &Url,
+        msg: messages::AppendEntriesRequest<crate::raft::Transition>,
+    ) -> Self::AppendEntriesFut {
         self.post(url, &RpcRequest::AppendEntries(msg))
     }
 
@@ -56,7 +65,11 @@ impl RpcClient for HttpRpcClient {
         self.post(url, &RpcRequest::Vote(msg))
     }
 
-    fn install_snapshot(&self, url: &Url, msg: messages::InstallSnapshotRequest) -> Self::InstallSnapshotFut {
+    fn install_snapshot(
+        &self,
+        url: &Url,
+        msg: messages::InstallSnapshotRequest,
+    ) -> Self::InstallSnapshotFut {
         self.post(url, &RpcRequest::InstallSnapshot(msg))
     }
 }
@@ -67,5 +80,5 @@ pub enum RpcRequest {
     GetNodes,
     AppendEntries(messages::AppendEntriesRequest<crate::raft::Transition>),
     Vote(messages::VoteRequest),
-    InstallSnapshot(messages::InstallSnapshotRequest)
+    InstallSnapshot(messages::InstallSnapshotRequest),
 }

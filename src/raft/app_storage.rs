@@ -1,13 +1,13 @@
-use actix::fut::result;
-use actix::{Actor, Context, Handler, ResponseActFuture};
-use actix_raft::messages;
-use actix_raft::storage;
 use crate::error::Error;
 use crate::node::SharedNetworkState;
 use crate::raft::DataResponse;
 use crate::raft::Transition;
-use log::{debug, trace, info};
-use serde::{Serialize, Deserialize};
+use actix::fut::result;
+use actix::{Actor, Context, Handler, ResponseActFuture};
+use actix_raft::messages;
+use actix_raft::storage;
+use log::{debug, info, trace};
+use serde::{Deserialize, Serialize};
 use std::mem;
 
 #[derive(Serialize, Deserialize)]
@@ -19,12 +19,15 @@ pub struct AppStorage {
 }
 
 impl AppStorage {
-    pub fn new(shared_network_state: SharedNetworkState, membership: messages::MembershipConfig) -> Self {
+    pub fn new(
+        shared_network_state: SharedNetworkState,
+        membership: messages::MembershipConfig,
+    ) -> Self {
         Self {
             shared_network_state,
             snapshot_path: None,
             membership,
-            logs: vec![]
+            logs: vec![],
         }
     }
 
@@ -48,8 +51,14 @@ impl AppStorage {
     fn apply_to_state_machine(&mut self, data: Transition) {
         debug!("Received message: {:?}", data);
         match data {
-            Transition::AddNode { id, name, host, port } => {
-                self.shared_network_state.register_node(id, name, host, port);
+            Transition::AddNode {
+                id,
+                name,
+                host,
+                port,
+            } => {
+                self.shared_network_state
+                    .register_node(id, name, host, port);
             }
         }
     }
@@ -59,13 +68,13 @@ impl AppStorage {
         match msg {
             messages::EntryPayload::Blank => {}
             messages::EntryPayload::Normal(messages::EntryNormal { data }) => {
-                self.apply_to_state_machine(data); 
+                self.apply_to_state_machine(data);
             }
             messages::EntryPayload::ConfigChange(messages::EntryConfigChange { membership }) => {
-                self.membership = membership; 
+                self.membership = membership;
             }
             messages::EntryPayload::SnapshotPointer(messages::EntrySnapshotPointer { path }) => {
-                self.snapshot_path = Some(path); 
+                self.snapshot_path = Some(path);
             }
         }
     }
@@ -194,7 +203,9 @@ impl Handler<storage::ApplyEntryToStateMachine<Transition, DataResponse, Error>>
 
         self.apply_entry_to_state_machine(payload);
 
-        Box::new(result(Ok(DataResponse::success("Successfully applied entry to state machine"))))
+        Box::new(result(Ok(DataResponse::success(
+            "Successfully applied entry to state machine",
+        ))))
     }
 }
 
@@ -233,14 +244,14 @@ impl Handler<storage::CreateSnapshot<Error>> for AppStorage {
             term: latest_log.term,
             index: latest_log.index,
             membership: self.membership.clone(),
-            pointer: messages::EntrySnapshotPointer { 
-                path: match snapshot_path { 
+            pointer: messages::EntrySnapshotPointer {
+                path: match snapshot_path {
                     Some(s) => s.clone(),
-                    None => String::from(".")
-                }
-            }
+                    None => String::from("."),
+                },
+            },
         };
-        
+
         Box::new(result(Ok(snapshot)))
     }
 }

@@ -1,28 +1,28 @@
-use log::{debug, error};
-use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::fmt::Debug;
-use reqwest::r#async::{Client, Body};
-use std::io::Cursor;
-use std::convert::TryInto;
-use reqwest::Url;
 use crate::futures::Future;
 use crate::futures::Stream;
-use reqwest::r#async::Chunk;
 use crate::node::AppNode;
+use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
 use futures::future::ok;
+use log::{debug, error};
+use reqwest::r#async::Chunk;
+use reqwest::r#async::{Body, Client};
+use reqwest::Url;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::convert::TryInto;
+use std::fmt::Debug;
+use std::io::Cursor;
 
-pub struct AdminNetwork { 
-    http_helper: crate::http_helper::HttpHelper
+pub struct AdminNetwork {
+    http_helper: crate::http_helper::HttpHelper,
 }
 
-type AdminNetworkFut<E, R> = Box<dyn Future<Item=E, Error=R>>;
+type AdminNetworkFut<E, R> = Box<dyn Future<Item = E, Error = R>>;
 
 impl AdminNetwork {
     pub fn new() -> Self {
         Self {
-            http_helper: crate::http_helper::HttpHelper::new()
+            http_helper: crate::http_helper::HttpHelper::new(),
         }
     }
 
@@ -30,14 +30,19 @@ impl AdminNetwork {
         self.http_helper.get(url)
     }
 
-    pub fn session_request(&mut self, url: Url, msg: CreateSessionRequest) -> AdminNetworkFut<CreateSessionResponse, ()> {
+    pub fn session_request(
+        &mut self,
+        url: Url,
+        msg: CreateSessionRequest,
+    ) -> AdminNetworkFut<CreateSessionResponse, ()> {
         debug!("Handling CreateSessionRequest: {:?}", msg);
 
-        self.http_helper.post_to_uri::<CreateSessionRequest, CreateSessionResponse>(url, msg)
+        self.http_helper
+            .post_to_uri::<CreateSessionRequest, CreateSessionResponse>(url, msg)
     }
 
     /*fn post_to_uri<S: Serialize + Debug, D: DeserializeOwned + Debug>(&self, uri: Url, msg: S) -> AdminNetworkFut<CreateSessionResponse, ()> {
-        debug!("POST to {}", uri); 
+        debug!("POST to {}", uri);
         debug!("Serializing: {:?}", msg);
 
         let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();

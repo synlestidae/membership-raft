@@ -1,53 +1,53 @@
-use actix::Addr;
-use actix::prelude::Future;
-use actix_raft::messages;
-use bincode;
-use crate::AppRaft;
 use crate::node::SharedNetworkState;
 use crate::raft::ClientPayload;
-use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
 use crate::rpc::RpcRequest;
-use rocket::Data as RocketData;
-use rocket::Handler;
-use rocket::Request;
-use rocket::Response;
-use rocket::Route;
+use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
+use crate::AppRaft;
+use actix::prelude::Future;
+use actix::Addr;
+use actix_raft::messages;
+use actix_raft::NodeId;
+use bincode;
+use futures::future::{err, ok};
+use rocket;
 use rocket::config::{Config, ConfigBuilder, Environment};
 use rocket::handler::Outcome;
 use rocket::http::ContentType;
 use rocket::http::Method;
 use rocket::http::Status;
-use rocket::response::Responder;
 use rocket::response;
-use rocket;
-use serde::{Serialize};
+use rocket::response::Responder;
+use rocket::Data as RocketData;
+use rocket::Handler;
+use rocket::Request;
+use rocket::Response;
+use rocket::Route;
+use serde::Serialize;
+use serde_json::from_slice;
+use serde_json::Value;
 use std::convert::From;
 use std::io::Read;
-use actix_raft::NodeId;
-use futures::future::{ok, err};
-use serde_json::Value;
-use serde_json::{from_slice};
 
 pub struct WebServer {
     addr: Addr<AppRaft>,
     shared_network: SharedNetworkState,
     rocket_config: Config,
-    node_id: NodeId
+    node_id: NodeId,
 }
 
 #[derive(Debug)]
 pub struct WebServerError {
-   pub error_message: String,
-   pub status_code: u16
+    pub error_message: String,
+    pub status_code: u16,
 }
 
-pub type WebserverFut<E, R> = Box<dyn Future<Item=E, Error=R>>;
+pub type WebserverFut<E, R> = Box<dyn Future<Item = E, Error = R>>;
 
 impl From<Box<bincode::ErrorKind>> for WebServerError {
     fn from(error: Box<bincode::ErrorKind>) -> Self {
         Self {
             error_message: format!("Error deserialising data: {}", error),
-            status_code: 400
+            status_code: 400,
         }
     }
 }
@@ -56,7 +56,7 @@ impl From<serde_json::Error> for WebServerError {
     fn from(error: serde_json::Error) -> Self {
         Self {
             error_message: format!("Error deserialising data: {}", error),
-            status_code: 400
+            status_code: 400,
         }
     }
 }
@@ -85,8 +85,8 @@ impl Handler for PostHandler {
         let mut buffer = Vec::new();
 
         match data.open().read_to_end(&mut buffer) {
-            Ok(_) => {},
-            Err(err) => return Outcome::failure(Status::InternalServerError)
+            Ok(_) => {}
+            Err(err) => return Outcome::failure(Status::InternalServerError),
         }
 
         let request = match serde_json::from_slice(&buffer) {
@@ -96,7 +96,7 @@ impl Handler for PostHandler {
 
         let value = match self.handle_request(request) {
             Ok(v) => v,
-            Err(err) => return Outcome::failure(Status::InternalServerError)
+            Err(err) => return Outcome::failure(Status::InternalServerError),
         };
 
         let value_bytes = match serde_json::to_vec(&value) {
@@ -115,10 +115,9 @@ impl Handler for PostHandler {
             .raw_header("Server", "Membership")
             .sized_body(Cursor::new(value_bytes))
             .finalize();
-        
-        Outcome::Success(response) 
-    }
 
+        Outcome::Success(response)
+    }
 }
 
 impl From<actix::MailboxError> for WebServerError {
@@ -127,9 +126,9 @@ impl From<actix::MailboxError> for WebServerError {
     }
 }
 
-use log::{debug, error, info};
-use actix_raft::admin;
 use actix_raft;
+use actix_raft::admin;
+use log::{debug, error, info};
 
 impl PostHandler {
     fn handle_request<'r>(&self, object: RpcRequest) -> Result<serde_json::Value, WebServerError> {
@@ -139,52 +138,68 @@ impl PostHandler {
 
                 info!("New node: {:?}", new_node);
 
-                self.shared_network.register_node(new_node.id, &new_node.name, new_node.host.clone(), new_node.port);
+                self.shared_network.register_node(
+                    new_node.id,
+                    &new_node.name,
+                    new_node.host.clone(),
+                    new_node.port,
+                );
 
-                let entry = messages::EntryNormal { 
-                    data: crate::raft::Transition::AddNode { 
+                let entry = messages::EntryNormal {
+                    data: crate::raft::Transition::AddNode {
                         id: new_node.id,
                         name: new_node.name,
                         host: new_node.host,
-                        port: new_node.port 
-                    } 
+                        port: new_node.port,
+                    },
                 };
                 let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
                 self.addr.send(payload).wait().unwrap();
 
-                let proposal_result = self.addr
+                let proposal_result = self
+                    .addr
                     .send(admin::ProposeConfigChange::new(vec![new_node.id], vec![]))
                     .wait()
                     .unwrap();
-                
+
                 serde_json::to_value(match proposal_result {
-                    Ok(()) => CreateSessionResponse::Success { leader_node_id: self.node_id },
-                    Err(actix_raft::admin::ProposeConfigChangeError::Noop) => CreateSessionResponse::Success { leader_node_id: self.node_id },
-                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(None)) => CreateSessionResponse::Error,
-                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(Some(leader_node_id))) => {
+                    Ok(()) => CreateSessionResponse::Success {
+                        leader_node_id: self.node_id,
+                    },
+                    Err(actix_raft::admin::ProposeConfigChangeError::Noop) => {
+                        CreateSessionResponse::Success {
+                            leader_node_id: self.node_id,
+                        }
+                    }
+                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(None)) => {
+                        CreateSessionResponse::Error
+                    }
+                    Err(actix_raft::admin::ProposeConfigChangeError::NodeNotLeader(Some(
+                        leader_node_id,
+                    ))) => {
                         if let Some(leader_node) = self.shared_network.get_node(leader_node_id) {
                             CreateSessionResponse::RedirectToLeader { leader_node }
                         } else {
                             CreateSessionResponse::Error
                         }
-                    },
-                    Err(actix_raft::admin::ProposeConfigChangeError::Internal) => return Err(
-                        WebServerError { 
-                            error_message: format!("Error handling client payload"), 
-                            status_code: 500 
-                        }
-                    ),
+                    }
+                    Err(actix_raft::admin::ProposeConfigChangeError::Internal) => {
+                        return Err(WebServerError {
+                            error_message: format!("Error handling client payload"),
+                            status_code: 500,
+                        })
+                    }
                     Err(e) => {
                         error!("Error with creating session: {:?}", e);
 
                         CreateSessionResponse::Error
-                    },
+                    }
                 })?
-            },
+            }
             RpcRequest::GetNodes => unimplemented!(),
             RpcRequest::AppendEntries(append_entries_request) => unimplemented!(),
             RpcRequest::Vote(vote_request) => unimplemented!(),
-            RpcRequest::InstallSnapshot(install_snapshot_request) => unimplemented!()
+            RpcRequest::InstallSnapshot(install_snapshot_request) => unimplemented!(),
         };
 
         Ok(value)
@@ -255,13 +270,13 @@ impl PostHandler {
 
         shared_network.register_node(new_node.id, &new_node.name, new_node.host.clone(), new_node.port);
 
-        let entry = messages::EntryNormal { 
-            data: crate::raft::Transition::AddNode { 
+        let entry = messages::EntryNormal {
+            data: crate::raft::Transition::AddNode {
                 id: new_node.id,
                 name: new_node.name,
                 host: new_node.host,
-                port: new_node.port 
-            } 
+                port: new_node.port
+            }
         };
 
         let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
@@ -276,7 +291,7 @@ impl PostHandler {
 
         let node_id = self.node_id;
 
-        Box::new(self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![])) 
+        Box::new(self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![]))
             .map(move |result| {
                 match result {
                     Ok(_) => CreateSessionResponse::Success { leader_node_id: node_id },
@@ -286,7 +301,7 @@ impl PostHandler {
                         if let Some(leader_node) = leader_node_option {
                             error!("Redirecting client to leader");
                             CreateSessionResponse::RedirectToLeader {
-                                leader_node 
+                                leader_node
                             }
                         } else {
                             error!("Cannot find info for leader node");
@@ -318,7 +333,12 @@ impl PostHandler {
 }
 
 impl WebServer {
-    pub(crate) fn new(port: u16, addr: Addr<AppRaft>, shared_network_state: SharedNetworkState, node_id: NodeId) -> Self {
+    pub(crate) fn new(
+        port: u16,
+        addr: Addr<AppRaft>,
+        shared_network_state: SharedNetworkState,
+        node_id: NodeId,
+    ) -> Self {
         Self {
             addr,
             shared_network: shared_network_state,
@@ -327,7 +347,7 @@ impl WebServer {
                 .address("0.0.0.0")
                 .port(port)
                 .finalize()
-                .unwrap()
+                .unwrap(),
         }
     }
 
@@ -335,13 +355,12 @@ impl WebServer {
         let post_handler = PostHandler {
             node_id,
             addr: self.addr.clone(),
-            shared_network: self.shared_network.clone()
+            shared_network: self.shared_network.clone(),
         };
 
         let route = Route::new(Method::Post, "/rpc", post_handler);
 
-        let rocket = rocket::custom(self.rocket_config.clone())
-            .mount("/", vec![route]);
+        let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![route]);
 
         rocket.launch();
     }

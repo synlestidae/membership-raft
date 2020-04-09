@@ -14,8 +14,11 @@ impl actix::Actor for AppMetrics {
 impl actix::Handler<actix_raft::RaftMetrics> for AppMetrics {
     type Result = ();
 
-    fn handle(&mut self, msg: actix_raft::RaftMetrics, _ctx: &mut actix::Context<Self>) -> Self::Result {
+    fn handle(
+        &mut self,
+        msg: actix_raft::RaftMetrics,
+        _ctx: &mut actix::Context<Self>,
+    ) -> Self::Result {
         debug!("Metrics: {:?}", msg)
     }
 }
-
