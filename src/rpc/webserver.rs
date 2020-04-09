@@ -196,140 +196,20 @@ impl PostHandler {
                     }
                 })?
             }
-            RpcRequest::GetNodes => unimplemented!(),
-            RpcRequest::AppendEntries(append_entries_request) => unimplemented!(),
-            RpcRequest::Vote(vote_request) => unimplemented!(),
-            RpcRequest::InstallSnapshot(install_snapshot_request) => unimplemented!(),
+            RpcRequest::GetNodes => serde_json::to_value(&self.shared_network.get_nodes())?,
+            RpcRequest::AppendEntries(append_entries_request) => {
+                serde_json::to_value(self.addr.send(append_entries_request).wait()?)?
+            }
+            RpcRequest::Vote(vote_request) => {
+                serde_json::to_value(self.addr.send(vote_request).wait()?)?
+            }
+            RpcRequest::InstallSnapshot(install_snapshot_request) => {
+                serde_json::to_value(self.addr.send(install_snapshot_request).wait()?)?
+            }
         };
 
         Ok(value)
-
-        /*let value_bytes = match serde_json::to_vec(&value) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                error!("Error serializing response: {:?}", err);
-
-                return Outcome::failure(Status::InternalServerError);
-            }
-        };*/
     }
-    /*fn handle_client_payload(&self, data: Vec<u8>) -> WebserverFut<Value, ()> {
-        let payload: ClientPayload = bincode::deserialize(&data).unwrap();
-
-        Box::new(self.addr
-            .send(messages::ClientPayload::new(messages::EntryNormal { data: payload.data }, messages::ResponseMode::Committed))
-            .map(|result| result.map_err(|_| ()))
-            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 } ))
-
-    }
-
-    fn handle_append_entries(&self, data: Vec<u8>) -> WebserverFut<Result<messages::AppendEntriesResponse, ()>, WebServerError> {
-        debug!("Deserialising AppendEntriesRequest request of length {}", data.len());
-
-        let payload: messages::AppendEntriesRequest<crate::raft::Transition> = bincode::deserialize(&data).unwrap();
-
-        debug!("Handling AppendEntriesRequest: {:?}", payload);
-
-        Box::new(self.addr.send(payload)
-            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 }))
-    }
-
-    fn handle_vote_request(&self, data: Vec<u8>) -> WebserverFut<Result<messages::VoteResponse, ()>, WebServerError> {
-        debug!("Handling a vote of {} bytes", data.len());
-        let payload: messages::VoteRequest = bincode::deserialize(&data).unwrap();
-
-        debug!("VoteRequest: {:?}", payload);
-
-        Box::new(self.addr.send(payload)
-            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 })
-        )
-    }
-
-    fn handle_install_snapshot_request(&self, data: Vec<u8>) -> WebserverFut<Result<messages::InstallSnapshotResponse, ()>, WebServerError> {
-        let payload: messages::InstallSnapshotRequest = bincode::deserialize(&data).unwrap();
-
-        debug!("InstallSnapshotResponse: {:?}", payload);
-
-        Box::new(self.addr.send(payload)
-            .map_err(|_| WebServerError { error_message: format!("Error handling client payload"), status_code: 500 })
-        )
-    }
-
-    fn handle_get_nodes(&self) -> Vec<crate::node::AppNode> {
-        debug!("Getting nodes");
-        self.shared_network.get_nodes()
-    }
-
-    fn handle_create_session_request(&self, data: Vec<u8>) -> WebserverFut<crate::rpc::CreateSessionResponse, WebServerError> {
-        let mut shared_network = self.shared_network.clone();
-        let request: CreateSessionRequest = bincode::deserialize(&data).unwrap();
-
-        let new_node = request.new_node;
-
-        info!("New node: {:?}", new_node);
-
-        shared_network.register_node(new_node.id, &new_node.name, new_node.host.clone(), new_node.port);
-
-        let entry = messages::EntryNormal {
-            data: crate::raft::Transition::AddNode {
-                id: new_node.id,
-                name: new_node.name,
-                host: new_node.host,
-                port: new_node.port
-            }
-        };
-
-        let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
-
-        let client_future = self.addr.send(payload)
-            .map(|r| r)
-            .map_err(|err| {
-                error!("Error sending ClientPayload: {:?}", err);
-
-                unimplemented!("Error sending ClientPayload: {:?}", err)
-            });
-
-        let node_id = self.node_id;
-
-        Box::new(self.addr.send(admin::ProposeConfigChange::new(vec![new_node.id], vec![]))
-            .map(move |result| {
-                match result {
-                    Ok(_) => CreateSessionResponse::Success { leader_node_id: node_id },
-                    Err(admin::ProposeConfigChangeError::NodeNotLeader(Some(node_id))) => {
-                        let leader_node_option = shared_network.get_node(node_id);
-
-                        if let Some(leader_node) = leader_node_option {
-                            error!("Redirecting client to leader");
-                            CreateSessionResponse::RedirectToLeader {
-                                leader_node
-                            }
-                        } else {
-                            error!("Cannot find info for leader node");
-                            CreateSessionResponse::Error
-                        }
-                    },
-                    Err(admin::ProposeConfigChangeError::NodeNotLeader(None)) => {
-                        error!("Error with creating session: NO LEADER!");
-
-                        CreateSessionResponse::Error
-                    },
-                    Err(e) => {
-                        error!("Error with creating session: {:?}", e);
-
-                        CreateSessionResponse::Error
-                    },
-                }
-            })
-            .then(|res| match res {
-                Err(e) => unimplemented!(),
-                Ok(CreateSessionResponse::Success { leader_node_id }) => {
-                    return Box::new(client_future
-                        .map(move |_| CreateSessionResponse::Success { leader_node_id })
-                        .map_err(|_| unimplemented!()))
-                },
-                Ok(e) => unimplemented!()
-            }))
-    }*/
 }
 
 impl WebServer {
