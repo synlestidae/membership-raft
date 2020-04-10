@@ -4,9 +4,12 @@ use futures::future::Future;
 use crate::node::AppNode;
 use actix_raft::messages;
 use actix_raft;
+use actix;
 
+#[derive(Debug)]
 pub enum RpcError {
     Request,
+    Actix(actix::Error),
     StatusCode,
 }
 
@@ -19,7 +22,7 @@ pub trait RpcClient {
 
     fn join_cluster(&self, url: &Url, msg: CreateSessionRequest) -> Self::JoinClusterFut;
 
-    fn get_nodes(&self, url: &Url) -> Self::JoinClusterFut;
+    fn get_nodes(&self, url: &Url) -> Self::GetNodesFut;
 
     fn append_entries(&self, url: &Url, msg: messages::AppendEntriesRequest<crate::raft::Transition>) -> Self::AppendEntriesFut;
 

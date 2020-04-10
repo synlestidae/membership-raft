@@ -3,27 +3,28 @@ use crate::rpc;
 use crate::rpc::CreateSessionResponse;
 use crate::AppRaft;
 use actix;
-use actix::fut::result;
 use actix_raft::admin;
 use actix_raft::NodeId;
 use log::*;
+use crate::rpc::HttpRpcClient;
+use crate::rpc::RpcClient;
 
 pub struct StartupActor {
     pub node_id: actix_raft::NodeId,
     pub raft_addr: actix::Addr<AppRaft>,
-    pub admin_api: rpc::AdminNetwork,
+    pub http_rpc_client: HttpRpcClient
 }
 
 impl StartupActor {
     pub fn new(
         node_id: actix_raft::NodeId,
         raft_addr: actix::Addr<AppRaft>,
-        admin_api: rpc::AdminNetwork,
+        http_rpc_client: HttpRpcClient,
     ) -> Self {
         Self {
             raft_addr,
             node_id,
-            admin_api,
+            http_rpc_client,
         }
     }
 }
@@ -63,19 +64,6 @@ pub struct StartupResponse {
 pub struct StartupErr {}
 
 use actix::fut::ActorFuture;
-
-/*struct StartupFuture {
-}
-
-impl actix::ActorFuture for StartupFuture {
-    type Item = StartupResponse;
-    type Error = StartupErr;
-    type Actor = StartupActor;
-
-    fn poll(&mut self, srv: &mut Self::Actor, ctx: &mut <Self::Actor as actix::Actor>::Context) -> std::result::Result<utures::Async<StartupResponse>, StartupErr> {
-        todo!()
-    }
-}*/
 
 use actix::prelude::Future;
 
@@ -126,13 +114,13 @@ impl actix::Handler<StartupRequest> for StartupActor {
                     },
                 };
                 let url = reqwest::Url::parse(&format!(
-                    "http://{}/client/createSessionRequest",
+                    "http://{}/rpc",
                     config.bootstrap_hosts[0]
                 ))
                 .unwrap();
                 Box::new(
-                    self.admin_api
-                        .session_request(url, msg)
+                    self.http_rpc_client
+                        .join_cluster(&url, msg)
                         .map(|r| StartupResponse {
                             leader_node_id: match r {
                                 CreateSessionResponse::Success { leader_node_id } => leader_node_id,

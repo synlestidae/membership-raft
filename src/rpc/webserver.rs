@@ -1,14 +1,12 @@
 use crate::node::SharedNetworkState;
-use crate::raft::ClientPayload;
 use crate::rpc::RpcRequest;
-use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
+use crate::rpc::{CreateSessionResponse};
 use crate::AppRaft;
 use actix::prelude::Future;
 use actix::Addr;
 use actix_raft::messages;
 use actix_raft::NodeId;
 use bincode;
-use futures::future::{err, ok};
 use rocket;
 use rocket::config::{Config, ConfigBuilder, Environment};
 use rocket::handler::Outcome;
@@ -22,9 +20,6 @@ use rocket::Handler;
 use rocket::Request;
 use rocket::Response;
 use rocket::Route;
-use serde::Serialize;
-use serde_json::from_slice;
-use serde_json::Value;
 use std::convert::From;
 use std::io::Read;
 
@@ -43,11 +38,29 @@ pub struct WebServerError {
 
 pub type WebserverFut<E, R> = Box<dyn Future<Item = E, Error = R>>;
 
+impl From<()> for WebServerError {
+    fn from(_: ()) -> Self {
+        Self {
+            error_message: format!("Unknown error"),
+            status_code: 500,
+        }
+    }
+}
+
 impl From<Box<bincode::ErrorKind>> for WebServerError {
     fn from(error: Box<bincode::ErrorKind>) -> Self {
         Self {
             error_message: format!("Error deserialising data: {}", error),
-            status_code: 400,
+            status_code: 500,
+        }
+    }
+}
+
+impl From<actix_raft::messages::ClientError<crate::raft::Transition, crate::raft::DataResponse, crate::error::Error>> for WebServerError {
+    fn from(error: actix_raft::messages::ClientError<crate::raft::Transition, crate::raft::DataResponse, crate::error::Error>) -> Self {
+        Self {
+            error_message: format!("Error : {}", error),
+            status_code: 500,
         }
     }
 }
@@ -74,10 +87,6 @@ struct PostHandler {
     shared_network: SharedNetworkState,
 }
 
-fn serialize<S: Serialize>(s: S) -> Vec<u8> {
-    bincode::serialize(&s).unwrap()
-}
-
 use std::io::Cursor;
 
 impl Handler for PostHandler {
@@ -88,17 +97,29 @@ impl Handler for PostHandler {
 
         match data.open().read_to_end(&mut buffer) {
             Ok(_) => {}
-            Err(err) => return Outcome::failure(Status::InternalServerError),
+            Err(err) => {
+                error!("Error reading request into buffer: {:?}", err);
+
+                return Outcome::failure(Status::InternalServerError)
+            },
         }
 
         let request = match serde_json::from_slice(&buffer) {
             Ok(o) => o,
-            Err(err) => return Outcome::failure(Status::BadRequest),
+            Err(err) => {
+                error!("Error parsing request JSON: {:?}", err);
+
+                return Outcome::failure(Status::BadRequest)
+            },
         };
 
         let value = match self.handle_request(request) {
             Ok(v) => v,
-            Err(err) => return Outcome::failure(Status::InternalServerError),
+            Err(err) => {
+                error!("Error handling request: {:?}", err);
+
+                return Outcome::failure(Status::InternalServerError)
+            },
         };
 
         let value_bytes = match serde_json::to_vec(&value) {
@@ -123,8 +144,11 @@ impl Handler for PostHandler {
 }
 
 impl From<actix::MailboxError> for WebServerError {
-    fn from(_: actix::MailboxError) -> Self {
-        unimplemented!()
+    fn from(err: actix::MailboxError) -> Self {
+        WebServerError {
+            error_message: format!("Mailbox error: {:?}", err),
+            status_code: 500
+        }
     }
 }
 
@@ -156,7 +180,7 @@ impl PostHandler {
                     },
                 };
                 let payload = messages::ClientPayload::new(entry, messages::ResponseMode::Applied);
-                self.addr.send(payload).wait().unwrap();
+                self.addr.send(payload).wait()??;
 
                 let proposal_result = self
                     .addr
@@ -200,13 +224,16 @@ impl PostHandler {
             }
             RpcRequest::GetNodes => serde_json::to_value(&self.shared_network.get_nodes())?,
             RpcRequest::AppendEntries(append_entries_request) => {
-                serde_json::to_value(self.addr.send(append_entries_request).wait()?)?
+                let value: messages::AppendEntriesResponse = self.addr.send(append_entries_request).wait()??;
+                serde_json::to_value(value)?
             }
             RpcRequest::Vote(vote_request) => {
-                serde_json::to_value(self.addr.send(vote_request).wait()?)?
+                let value: messages::VoteResponse = self.addr.send(vote_request).wait()??;
+                serde_json::to_value(value)?
             }
             RpcRequest::InstallSnapshot(install_snapshot_request) => {
-                serde_json::to_value(self.addr.send(install_snapshot_request).wait()?)?
+                let value: messages::InstallSnapshotResponse = self.addr.send(install_snapshot_request).wait()??;
+                serde_json::to_value(value)?
             }
         };
 

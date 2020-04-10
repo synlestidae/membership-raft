@@ -19,6 +19,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fmt::Debug;
 use std::sync::mpsc::Sender;
+use crate::rpc::HttpRpcClient;
+use crate::rpc::RpcClient;
 
 /// Your application's network interface actor.
 pub struct AppNetwork {
@@ -26,7 +28,7 @@ pub struct AppNetwork {
     node_id: NodeId,
     webserver: WebserverConfig,
     node_event_sender: Sender<NodeEvent>,
-    http_helper: HttpHelper,
+    rpc_client: HttpRpcClient
 }
 
 impl AppNetwork {
@@ -41,79 +43,7 @@ impl AppNetwork {
             node_id,
             webserver: webserver.clone(),
             node_event_sender,
-            http_helper: HttpHelper::new(),
-        }
-    }
-
-    fn post<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(
-        &mut self,
-        node_id: NodeId,
-        msg: S,
-        path: &str,
-    ) -> HttpFuture<D, ()> {
-        //ResponseActFuture<A, R, reqwest::Error> {
-        let node_option = self.shared_network_state.get_node(node_id);
-
-        match node_option {
-            Some(node) => {
-                let uri =
-                    Url::parse(&format!("http://{}:{}{}", node.host, node.port, path)).unwrap();
-
-                debug!("Sending msg to node {} at {}", node_id, uri);
-                debug!("Serializing: {:?}", msg);
-
-                self.http_helper.post_to_uri(uri, msg)
-
-                /*let body_bytes: Vec<u8>  = bincode::serialize(&msg).unwrap();
-                let body: Body = body_bytes.into();
-
-                let response_result = reqwest::blocking::Client::new().post(&uri)
-                    .header("User-Agent", "Membership-Raft")
-                    .header("X-Node-Id", self.node_id)
-                    .header("X-Node-Port", self.webserver.port)
-                    .body(body)
-                    .send();
-
-                let res = match response_result {
-                    Ok(resp) => {
-                        let bytes = resp.bytes().unwrap().into_iter().collect::<Vec<u8>>();
-                        debug!("Deserializing {} bytes from {}", bytes.len(), path);
-
-                        let response: D = bincode::deserialize_from(Cursor::new(bytes)).unwrap();
-                        debug!("Deserialized: {:?}", response);
-
-                        Ok(response)
-                    },
-                    Err(err) => {
-                        error!("Error in response: {:?}", err);
-
-                        Err(err)
-                    }
-                };*/
-                //return res;
-            }
-            None => {
-                error!("Failed to get node with id {}", node_id);
-                unimplemented!()
-            }
-        }
-    }
-
-    fn handle_http<S: Serialize + Debug, D: 'static + DeserializeOwned + Debug>(
-        &mut self,
-        node_id: NodeId,
-        path: &str,
-        msg: S,
-    ) -> AppNetworkFut<D, ()> {
-        let node_option = self.shared_network_state.get_node(node_id);
-
-        match node_option {
-            Some(node) => Box::new(self.post(node.id, msg, path)),
-            None => {
-                error!("Unable to find node with id: {}", node_id);
-                //panic!("Not gonna happen");
-                Box::new(err(()))
-            }
+            rpc_client: HttpRpcClient::new()
         }
     }
 }
@@ -141,31 +71,27 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
     ) -> Self::Result {
         let node_option = self.shared_network_state.get_node(msg.target);
 
-        info!("AppendEntriesRequest: {:?}", msg);
+        if let Some(node) = node_option {
+            let node_ok = NodeEvent::ok(&node);
+            let node_err = NodeEvent::err(&node);
 
-        let node_event_sender = self.node_event_sender.clone();
-        let node_event_sender2 = self.node_event_sender.clone();
+            let sender1 = self.node_event_sender.clone();
+            let sender2 = self.node_event_sender.clone();
 
-        match node_option {
-            Some(node) => {
-                let node2 = node.clone();
-                return Box::new(
-                    self.post(node.id, msg, "/rpc/appendEntriesRequest")
-                        .map(move |resp| {
-                            info!("AppendEntriesRequest response: {:?}", resp);
+            Box::new(self.rpc_client
+                .append_entries(&node.rpc_url(), msg)
+                .map(move |resp| { 
+                    drop(sender1.send(node_ok));
 
-                            drop(node_event_sender.send(NodeEvent::ok(&node)));
-
-                            resp
-                        })
-                        .map_err(move |_| {
-                            drop(node_event_sender2.send(NodeEvent::err(&node2)));
-
-                            ()
-                        }),
-                );
-            }
-            None => panic!("Hang on, where do I send this thing?"),
+                    resp
+                })
+                .map_err(move |_| {
+                    drop(sender2.send(node_err));
+                
+                    ()
+                }))
+        } else {
+            panic!("Unsure where to send this")
         }
     }
 }
@@ -176,7 +102,11 @@ impl Handler<InstallSnapshotRequest> for AppNetwork {
     type Result = AppNetworkFut<InstallSnapshotResponse, ()>;
 
     fn handle(&mut self, msg: InstallSnapshotRequest, _ctx: &mut Self::Context) -> Self::Result {
-        self.handle_http(msg.target, "/rpc/installSnapshotRequest", msg)
+        debug!("Handling InstallSnapshotRequest: {:?}", msg);
+
+        let node = self.shared_network_state.get_node(msg.target).expect("Unable to find node");
+
+        Box::new(self.rpc_client.install_snapshot(&node.rpc_url(), msg).map_err(|_| ()))
     }
 }
 
@@ -188,6 +118,8 @@ impl Handler<VoteRequest> for AppNetwork {
     fn handle(&mut self, msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
         debug!("Handling VoteRequest: {:?}", msg);
 
-        self.handle_http::<VoteRequest, VoteResponse>(msg.target, "/rpc/voteRequest", msg)
+        let node = self.shared_network_state.get_node(msg.target).expect("Unable to find node");
+
+        Box::new(self.rpc_client.vote(&node.rpc_url(), msg).map_err(|_| ()))
     }
 }

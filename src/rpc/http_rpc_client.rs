@@ -7,8 +7,10 @@ use reqwest::r#async::Client;
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_slice, to_vec};
+use serde_json::{to_vec};
+use log::debug;
 
+#[derive(Clone)]
 pub struct HttpRpcClient {
     client: Client,
 }
@@ -46,10 +48,14 @@ impl RpcClient for HttpRpcClient {
     type InstallSnapshotFut = HttpFut<messages::InstallSnapshotResponse>;
 
     fn join_cluster(&self, url: &Url, msg: CreateSessionRequest) -> Self::JoinClusterFut {
+        debug!("Joining cluster at {}", url);
+
         self.post(url, &RpcRequest::JoinCluster(msg.clone()))
     }
 
-    fn get_nodes(&self, url: &Url) -> Self::JoinClusterFut {
+    fn get_nodes(&self, url: &Url) -> Self::GetNodesFut {
+        debug!("Getting nodes from {}", url);
+
         self.post(url, &RpcRequest::GetNodes)
     }
 
@@ -58,10 +64,14 @@ impl RpcClient for HttpRpcClient {
         url: &Url,
         msg: messages::AppendEntriesRequest<crate::raft::Transition>,
     ) -> Self::AppendEntriesFut {
+        debug!("Appending entries to {}", url);
+
         self.post(url, &RpcRequest::AppendEntries(msg))
     }
 
     fn vote(&self, url: &Url, msg: messages::VoteRequest) -> Self::VoteFut {
+        debug!("Voting at {}", url);
+
         self.post(url, &RpcRequest::Vote(msg))
     }
 
@@ -70,6 +80,8 @@ impl RpcClient for HttpRpcClient {
         url: &Url,
         msg: messages::InstallSnapshotRequest,
     ) -> Self::InstallSnapshotFut {
+        debug!("Installing snapshot at {}", url);
+
         self.post(url, &RpcRequest::InstallSnapshot(msg))
     }
 }

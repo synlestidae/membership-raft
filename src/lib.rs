@@ -82,7 +82,7 @@ pub fn main() {
         node_config.webserver.port,
     );
 
-    let admin_api = rpc::AdminNetwork::new();
+    let http_rpc_client = rpc::HttpRpcClient::new();
 
     // Build the actix system.
     let mut sys = actix::System::new("my-awesome-app");
@@ -117,17 +117,17 @@ pub fn main() {
         let mut nodes = vec![];
 
         for host in bootstrap_hosts {
+            use crate::rpc::RpcClient;
             info!("Getting members from {}", host);
 
-            let new_nodes = admin_api
-                .get_nodes(format!("http://{}/client/nodes", host).parse().unwrap())
-                .unwrap();
+            let shared_network_state2 = shared_network_state.clone();
 
-            for n in new_nodes.iter() {
-                shared_network_state.register_node(n.id, n.name.clone(), n.host.clone(), n.port);
-            }
+            actix::Arbiter::spawn(http_rpc_client
+                .get_nodes(&reqwest::Url::parse(&format!("http://{}/rpc", host)).expect("Failed to parse URL"))
+                .map(|nodes| nodes.into_iter().for_each(move |n| shared_network_state2.register_node(n.id, n.name.clone(), n.host.clone(), n.port)))
+                .map_err(|err| error!("Error creating session: {:?}", err)));
 
-            nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
+            //nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
         }
 
         nodes
@@ -198,7 +198,7 @@ pub fn main() {
     let startup = startup::StartupActor {
         node_id,
         raft_addr: raft_addr.clone(),
-        admin_api,
+        http_rpc_client: http_rpc_client.clone()
     };
 
     let startup_addr = startup.start();
@@ -209,8 +209,6 @@ pub fn main() {
         shared_network_state.clone(),
         node_id,
     );
-
-    let mut admin_network = rpc::AdminNetwork::new();
 
     std::thread::spawn(move || webserver.start(node_id));
 

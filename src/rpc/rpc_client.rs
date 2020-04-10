@@ -6,6 +6,7 @@ use futures::future::Future;
 use log::error;
 use reqwest::Url;
 
+#[derive(Debug)]
 pub enum RpcError {
     Request,
     StatusCode,
@@ -28,7 +29,7 @@ pub trait RpcClient {
 
     fn join_cluster(&self, url: &Url, req: CreateSessionRequest) -> Self::JoinClusterFut;
 
-    fn get_nodes(&self, url: &Url) -> Self::JoinClusterFut;
+    fn get_nodes(&self, url: &Url) -> Self::GetNodesFut;
 
     fn append_entries(
         &self,
