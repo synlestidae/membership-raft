@@ -20,7 +20,6 @@ extern crate toml;
 use crate::actix::Actor;
 use crate::clap::Clap;
 use crate::futures::Future;
-use actix::fut::result;
 use actix_raft::admin;
 use actix_raft::messages;
 use actix_raft::Config as RaftConfig;
@@ -31,7 +30,6 @@ use std::sync::mpsc::channel;
 mod config;
 mod discovery;
 mod error;
-mod http_helper;
 mod node;
 mod raft;
 mod rpc;
@@ -122,10 +120,24 @@ pub fn main() {
 
             let shared_network_state2 = shared_network_state.clone();
 
-            actix::Arbiter::spawn(http_rpc_client
-                .get_nodes(&reqwest::Url::parse(&format!("http://{}/rpc", host)).expect("Failed to parse URL"))
-                .map(|nodes| nodes.into_iter().for_each(move |n| shared_network_state2.register_node(n.id, n.name.clone(), n.host.clone(), n.port)))
-                .map_err(|err| error!("Error creating session: {:?}", err)));
+            actix::Arbiter::spawn(
+                http_rpc_client
+                    .get_nodes(
+                        &reqwest::Url::parse(&format!("http://{}/rpc", host))
+                            .expect("Failed to parse URL"),
+                    )
+                    .map(|nodes| {
+                        nodes.into_iter().for_each(move |n| {
+                            shared_network_state2.register_node(
+                                n.id,
+                                n.name.clone(),
+                                n.host.clone(),
+                                n.port,
+                            )
+                        })
+                    })
+                    .map_err(|err| error!("Error creating session: {:?}", err)),
+            );
 
             //nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
         }
@@ -198,7 +210,7 @@ pub fn main() {
     let startup = startup::StartupActor {
         node_id,
         raft_addr: raft_addr.clone(),
-        http_rpc_client: http_rpc_client.clone()
+        http_rpc_client: http_rpc_client.clone(),
     };
 
     let startup_addr = startup.start();

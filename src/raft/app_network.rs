@@ -1,26 +1,19 @@
 use crate::config::WebserverConfig;
-use crate::http_helper::{HttpFuture, HttpHelper};
 use crate::node::NodeEvent;
 use crate::node::SharedNetworkState;
 use crate::raft::Transition;
-use actix::fut::result;
-use actix::{Actor, Context, Handler, ResponseActFuture};
+use crate::rpc::HttpRpcClient;
+use crate::rpc::RpcClient;
+use actix::{Actor, Context, Handler};
 use actix_raft::messages::InstallSnapshotRequest;
 use actix_raft::messages::InstallSnapshotResponse;
 use actix_raft::messages::VoteRequest;
 use actix_raft::messages::VoteResponse;
 use actix_raft::NodeId;
 use actix_raft::{messages, RaftNetwork};
-use futures::future::err;
 use futures::Future;
-use log::{debug, error, info};
-use reqwest::Url;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::fmt::Debug;
+use log::debug;
 use std::sync::mpsc::Sender;
-use crate::rpc::HttpRpcClient;
-use crate::rpc::RpcClient;
 
 /// Your application's network interface actor.
 pub struct AppNetwork {
@@ -28,7 +21,7 @@ pub struct AppNetwork {
     node_id: NodeId,
     webserver: WebserverConfig,
     node_event_sender: Sender<NodeEvent>,
-    rpc_client: HttpRpcClient
+    rpc_client: HttpRpcClient,
 }
 
 impl AppNetwork {
@@ -43,7 +36,7 @@ impl AppNetwork {
             node_id,
             webserver: webserver.clone(),
             node_event_sender,
-            rpc_client: HttpRpcClient::new()
+            rpc_client: HttpRpcClient::new(),
         }
     }
 }
@@ -78,18 +71,20 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
             let sender1 = self.node_event_sender.clone();
             let sender2 = self.node_event_sender.clone();
 
-            Box::new(self.rpc_client
-                .append_entries(&node.rpc_url(), msg)
-                .map(move |resp| { 
-                    drop(sender1.send(node_ok));
+            Box::new(
+                self.rpc_client
+                    .append_entries(&node.rpc_url(), msg)
+                    .map(move |resp| {
+                        drop(sender1.send(node_ok));
 
-                    resp
-                })
-                .map_err(move |_| {
-                    drop(sender2.send(node_err));
-                
-                    ()
-                }))
+                        resp
+                    })
+                    .map_err(move |_| {
+                        drop(sender2.send(node_err));
+
+                        ()
+                    }),
+            )
         } else {
             panic!("Unsure where to send this")
         }
@@ -104,9 +99,16 @@ impl Handler<InstallSnapshotRequest> for AppNetwork {
     fn handle(&mut self, msg: InstallSnapshotRequest, _ctx: &mut Self::Context) -> Self::Result {
         debug!("Handling InstallSnapshotRequest: {:?}", msg);
 
-        let node = self.shared_network_state.get_node(msg.target).expect("Unable to find node");
+        let node = self
+            .shared_network_state
+            .get_node(msg.target)
+            .expect("Unable to find node");
 
-        Box::new(self.rpc_client.install_snapshot(&node.rpc_url(), msg).map_err(|_| ()))
+        Box::new(
+            self.rpc_client
+                .install_snapshot(&node.rpc_url(), msg)
+                .map_err(|_| ()),
+        )
     }
 }
 
@@ -118,7 +120,10 @@ impl Handler<VoteRequest> for AppNetwork {
     fn handle(&mut self, msg: VoteRequest, _ctx: &mut Self::Context) -> Self::Result {
         debug!("Handling VoteRequest: {:?}", msg);
 
-        let node = self.shared_network_state.get_node(msg.target).expect("Unable to find node");
+        let node = self
+            .shared_network_state
+            .get_node(msg.target)
+            .expect("Unable to find node");
 
         Box::new(self.rpc_client.vote(&node.rpc_url(), msg).map_err(|_| ()))
     }

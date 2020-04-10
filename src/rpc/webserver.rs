@@ -1,6 +1,6 @@
 use crate::node::SharedNetworkState;
+use crate::rpc::CreateSessionResponse;
 use crate::rpc::RpcRequest;
-use crate::rpc::{CreateSessionResponse};
 use crate::AppRaft;
 use actix::prelude::Future;
 use actix::Addr;
@@ -56,8 +56,22 @@ impl From<Box<bincode::ErrorKind>> for WebServerError {
     }
 }
 
-impl From<actix_raft::messages::ClientError<crate::raft::Transition, crate::raft::DataResponse, crate::error::Error>> for WebServerError {
-    fn from(error: actix_raft::messages::ClientError<crate::raft::Transition, crate::raft::DataResponse, crate::error::Error>) -> Self {
+impl
+    From<
+        actix_raft::messages::ClientError<
+            crate::raft::Transition,
+            crate::raft::DataResponse,
+            crate::error::Error,
+        >,
+    > for WebServerError
+{
+    fn from(
+        error: actix_raft::messages::ClientError<
+            crate::raft::Transition,
+            crate::raft::DataResponse,
+            crate::error::Error,
+        >,
+    ) -> Self {
         Self {
             error_message: format!("Error : {}", error),
             status_code: 500,
@@ -100,8 +114,8 @@ impl Handler for PostHandler {
             Err(err) => {
                 error!("Error reading request into buffer: {:?}", err);
 
-                return Outcome::failure(Status::InternalServerError)
-            },
+                return Outcome::failure(Status::InternalServerError);
+            }
         }
 
         let request = match serde_json::from_slice(&buffer) {
@@ -109,8 +123,8 @@ impl Handler for PostHandler {
             Err(err) => {
                 error!("Error parsing request JSON: {:?}", err);
 
-                return Outcome::failure(Status::BadRequest)
-            },
+                return Outcome::failure(Status::BadRequest);
+            }
         };
 
         let value = match self.handle_request(request) {
@@ -118,8 +132,8 @@ impl Handler for PostHandler {
             Err(err) => {
                 error!("Error handling request: {:?}", err);
 
-                return Outcome::failure(Status::InternalServerError)
-            },
+                return Outcome::failure(Status::InternalServerError);
+            }
         };
 
         let value_bytes = match serde_json::to_vec(&value) {
@@ -147,7 +161,7 @@ impl From<actix::MailboxError> for WebServerError {
     fn from(err: actix::MailboxError) -> Self {
         WebServerError {
             error_message: format!("Mailbox error: {:?}", err),
-            status_code: 500
+            status_code: 500,
         }
     }
 }
@@ -224,7 +238,8 @@ impl PostHandler {
             }
             RpcRequest::GetNodes => serde_json::to_value(&self.shared_network.get_nodes())?,
             RpcRequest::AppendEntries(append_entries_request) => {
-                let value: messages::AppendEntriesResponse = self.addr.send(append_entries_request).wait()??;
+                let value: messages::AppendEntriesResponse =
+                    self.addr.send(append_entries_request).wait()??;
                 serde_json::to_value(value)?
             }
             RpcRequest::Vote(vote_request) => {
@@ -232,7 +247,8 @@ impl PostHandler {
                 serde_json::to_value(value)?
             }
             RpcRequest::InstallSnapshot(install_snapshot_request) => {
-                let value: messages::InstallSnapshotResponse = self.addr.send(install_snapshot_request).wait()??;
+                let value: messages::InstallSnapshotResponse =
+                    self.addr.send(install_snapshot_request).wait()??;
                 serde_json::to_value(value)?
             }
         };

@@ -3,12 +3,12 @@ use crate::rpc::{CreateSessionRequest, CreateSessionResponse};
 use crate::rpc::{RpcClient, RpcError};
 use actix_raft::messages;
 use futures::future::Future;
+use log::debug;
 use reqwest::r#async::Client;
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{to_vec};
-use log::debug;
+use serde_json::to_vec;
 
 #[derive(Clone)]
 pub struct HttpRpcClient {

@@ -1,18 +1,18 @@
 use crate::node;
 use crate::rpc;
 use crate::rpc::CreateSessionResponse;
+use crate::rpc::HttpRpcClient;
+use crate::rpc::RpcClient;
 use crate::AppRaft;
 use actix;
 use actix_raft::admin;
 use actix_raft::NodeId;
 use log::*;
-use crate::rpc::HttpRpcClient;
-use crate::rpc::RpcClient;
 
 pub struct StartupActor {
     pub node_id: actix_raft::NodeId,
     pub raft_addr: actix::Addr<AppRaft>,
-    pub http_rpc_client: HttpRpcClient
+    pub http_rpc_client: HttpRpcClient,
 }
 
 impl StartupActor {
@@ -113,11 +113,8 @@ impl actix::Handler<StartupRequest> for StartupActor {
                         port: config.webserver.port,
                     },
                 };
-                let url = reqwest::Url::parse(&format!(
-                    "http://{}/rpc",
-                    config.bootstrap_hosts[0]
-                ))
-                .unwrap();
+                let url = reqwest::Url::parse(&format!("http://{}/rpc", config.bootstrap_hosts[0]))
+                    .unwrap();
                 Box::new(
                     self.http_rpc_client
                         .join_cluster(&url, msg)
