@@ -1,14 +1,9 @@
-use crate::actix::Actor;
-use crate::node;
 use crate::node::AppNode;
 use crate::raft;
 use crate::raft::RaftDiscovery;
 use crate::raft::RaftSettings;
 use crate::rpc::HttpRpcClient;
-use crate::AppRaft;
-use crate::NodeTracker;
 use actix_raft;
-use actix_raft::messages;
 use reqwest::UrlError;
 
 pub struct RaftBuilder {

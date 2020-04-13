@@ -1,8 +1,6 @@
+name = "second"
+is_new_cluster = true
+rpc_host = "localhost"
+rpc_port = 5002
+
 bootstrap_hosts = ["localhost:5001"]
-name = "poop"
-new_cluster = false
-
-[webserver]
-host = "localhost"
-port = 5002
-

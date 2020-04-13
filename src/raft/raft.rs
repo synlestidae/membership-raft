@@ -11,11 +11,13 @@ use actix_raft::admin;
 use log::{error, info, warn};
 use crate::futures::Future;
 use crate::actix::Actor;
+use tokio::time::Delay;
+use std::time::Duration;
 
 pub struct Raft {
     raft_settings: raft::RaftSettings,
     http_rpc_client: rpc::HttpRpcClient,
-    raft_addr: Option<actix::Addr<AppRaft>>,
+    pub raft_addr: Option<actix::Addr<AppRaft>>,
 }
 
 impl Raft {
@@ -30,7 +32,7 @@ impl Raft {
         }
     }
 
-    pub fn activate(&mut self) {
+    pub fn activate(&mut self) -> actix::Addr<AppRaft> {
         info!("Starting raft");
 
         let shared_network_state = node::SharedNetworkState::new();
@@ -68,11 +70,13 @@ impl Raft {
             metrics.start().recipient(),
         );
 
-        let port = self.raft_settings.rpc_port;
+        let addr = app_raft.start();
 
-        self.raft_addr = Some(app_raft.start());
+        self.raft_addr = Some(addr.clone());
 
         info!("Raft has now started");
+
+        addr
     }
 }
 
@@ -102,6 +106,7 @@ impl actix::Handler<messages::CreateClusterRequest> for Raft {
 
         match self.raft_addr {
             Some(ref mut addr) => {
+                    info!("Sending to cluster");
                     let request = addr.send(admin::InitWithConfig {
                         members: vec![msg.this_node.id],
                     });

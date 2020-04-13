@@ -1,6 +1,4 @@
 name = "main"
-new_cluster = true
-
-[webserver]
-host = "localhost"
-port = 5001
+is_new_cluster = true
+rpc_host = "localhost"
+rpc_port = 5001

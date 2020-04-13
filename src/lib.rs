@@ -119,16 +119,19 @@ pub fn main() {
     };
 
     let mut raft = builder.build();
-    raft.activate();
+    let app_addr = raft.activate();
+
     let raft_addr = raft.start();
-    let raft_addr2 = raft_addr.clone();
     let is_new_cluster = config.is_new_cluster;
 
     info!("Starting the node");
 
+    //sys.block_on(tokio::time::delay_for(tokio::time::Duration::new(2, 0)));
+
     if is_new_cluster {
+        info!("COnnected? {}", raft_addr.connected());
         sys.block_on(
-            raft_addr2
+            raft_addr
                 .send(messages::CreateClusterRequest { this_node })
                 .map(|result| info!("Result from creating cluster: {:?}", result))
                 .map_err(|err| {
@@ -136,12 +139,12 @@ pub fn main() {
 
                     std::thread::sleep(std::time::Duration::new(1, 0));
 
-                    std::process::exit(1);
+                    //std::process::exit(1);
                 }),
         );
     } else {
         sys.block_on(
-            raft_addr2
+            raft_addr
                 .send(messages::JoinClusterRequest { this_node, nodes })
                 .map(|result| info!("Result from joining cluster: {:?}", result))
                 .map_err(|err| {
@@ -149,10 +152,16 @@ pub fn main() {
 
                     std::thread::sleep(std::time::Duration::new(1, 0));
 
-                    std::process::exit(1);
+                    //std::process::exit(1);
                 })
         );
     }
+
+    match sys.block_on(app_addr.clone().send(actix_raft::admin::InitWithConfig::new(vec![node_id]))) {
+        Ok(res) => info!("GOOD? {:?}", res),
+        Err(err) => error!("BAD: {:?}", err)
+    };
+
 
     info!("Starting runtime");
 
