@@ -9,20 +9,19 @@ use actix;
 use actix_raft;
 use actix_raft::admin;
 use log::{error, info, warn};
+use crate::futures::Future;
+use crate::actix::Actor;
 
 pub struct Raft {
     raft_settings: raft::RaftSettings,
     http_rpc_client: rpc::HttpRpcClient,
     raft_addr: Option<actix::Addr<AppRaft>>,
-    //webserver_addr: actix::Addr<rpc::WebServer>,
 }
 
 impl Raft {
     pub fn new(
         raft_settings: raft::RaftSettings,
         http_rpc_client: rpc::HttpRpcClient,
-        //raft_addr: actix::Addr<AppRaft>,
-        //webserver_addr: actix::Addr<rpc::WebServer>,
     ) -> Self {
         Self {
             raft_settings,
@@ -30,12 +29,8 @@ impl Raft {
             raft_addr: None,
         }
     }
-}
 
-impl actix::Actor for Raft {
-    type Context = actix::Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
+    pub fn activate(&mut self) {
         info!("Starting raft");
 
         let shared_network_state = node::SharedNetworkState::new();
@@ -77,66 +72,15 @@ impl actix::Actor for Raft {
 
         self.raft_addr = Some(app_raft.start());
 
-        /*let webserver = crate::rpc::WebServer::new(
-            port,
-            raft_addr.clone(),
-            shared_network_state.clone(),
-            self.raft_settings.node_id,
-        );
+        info!("Raft has now started");
+    }
+}
 
+impl actix::Actor for Raft {
+    type Context = actix::Context<Self>;
 
-        let raft = raft::Raft::new(
-            raft_settings,
-            HttpRpcClient::new(),
-        );
-
-        raft*/
-
-        ////////////////////// STOP /////////////////////////////
-
-        /*let node_tracker_addr = node::NodeTracker::new().start();
-
-        let network_addr = raft::AppNetwork::new(
-            self.shared_network_state.clone(),
-            self.node_id,
-            node_tracker_addr,
-        ).start();
-        let storage = raft::AppStorage::new(self.shared_network_state.clone(), self.membership);
-        let metrics = raft::AppMetrics {};
-
-        let config = actix_raft::Config::build(String::from(match self.snapshot_dir {
-            Some(ref dir) => dir,
-            None => "./"
-        }))
-            .validate()
-            .unwrap();
-
-        let app_raft = AppRaft::new(
-            self.node_id,
-            config,
-            network_addr.clone(),
-            storage.start(),
-            metrics.start().recipient(),
-        );
-
-        let port = self.rpc_port;
-
-        let raft_addr = app_raft.start();
-
-        let webserver = crate::rpc::WebServer::new(
-            port,
-            raft_addr.clone(),
-            shared_network_state.clone(),
-            self.node_id,
-        );
-
-        let webserver_addr = webserver.start();
-
-        let raft = raft::Raft::new(
-            raft_addr,
-            webserver_addr,
-            HttpRpcClient::new(),
-        );*/
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        info!("Raft actor now STARTED");
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> actix::Running {
@@ -147,7 +91,7 @@ impl actix::Actor for Raft {
 }
 
 impl actix::Handler<messages::CreateClusterRequest> for Raft {
-    type Result = RaftFut<Result<(), admin::InitWithConfigError>, actix::MailboxError>; //actix::ResponseActFuture<Self, (), ()>;
+    type Result = RaftFut<(), ()>; //actix::ResponseActFuture<Self, (), ()>;
 
     fn handle(
         &mut self,
@@ -157,10 +101,21 @@ impl actix::Handler<messages::CreateClusterRequest> for Raft {
         info!("Creating a cluster: {:?}", msg);
 
         match self.raft_addr {
-            Some(ref mut addr) => RaftFut(Box::new(addr.send(admin::InitWithConfig {
-                members: vec![msg.this_node.id],
-            }))),
-            None => unimplemented!(), //return Box::new(ok(())
+            Some(ref mut addr) => {
+                    let request = addr.send(admin::InitWithConfig {
+                        members: vec![msg.this_node.id],
+                    });
+
+                    RaftFut(Box::new(request.then(|res| RaftFut(match res {
+                        Ok(Ok(result)) => Box::new(futures::future::ok(result)),
+                        _ => Box::new(futures::future::err(()))
+                    }))))
+            }
+            None => {
+                error!("Raft has not initialized with an address");
+
+                RaftFut(Box::new(futures::future::err(())))
+            }
         }
     }
 }
