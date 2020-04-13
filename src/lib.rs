@@ -1,6 +1,7 @@
 //#![deny(warnings)]
 extern crate actix;
 extern crate actix_raft;
+extern crate actix_rt;
 extern crate bincode;
 extern crate clap;
 extern crate futures;
@@ -46,6 +47,10 @@ type AppRaft =
     Raft<raft::Transition, raft::DataResponse, error::Error, raft::AppNetwork, raft::AppStorage>;
 
 pub fn main() {
+    actix::System::run(real_main);
+}
+
+pub fn real_main() {
     simple_logger::init().unwrap();
     let opts: config::Opts = config::Opts::parse();
 
@@ -79,7 +84,7 @@ pub fn main() {
     );
 
     // Build the actix system.
-    let mut sys = actix::System::new("my-awesome-app");
+    //let mut sys = actix::System::new("my-awesome-app");
 
     let mut builder = crate::raft::RaftBuilder::new(node_id);
 
@@ -118,8 +123,10 @@ pub fn main() {
         port: config.rpc_port,
     };
 
-    let mut raft = builder.build();
-    let app_addr = raft.activate();
+    let app_raft = builder.build();
+    let app_addr = app_raft.start();
+
+    let raft = raft::Raft::new(crate::rpc::HttpRpcClient::new(), app_addr.clone());
 
     let raft_addr = raft.start();
     let is_new_cluster = config.is_new_cluster;

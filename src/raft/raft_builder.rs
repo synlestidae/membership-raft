@@ -5,6 +5,10 @@ use crate::raft::RaftSettings;
 use crate::rpc::HttpRpcClient;
 use actix_raft;
 use reqwest::UrlError;
+use crate::AppRaft;
+use log::{info};
+use crate::node;
+use crate::actix::Actor;
 
 pub struct RaftBuilder {
     snapshot_dir: Option<String>,
@@ -75,23 +79,61 @@ impl RaftBuilder {
         self
     }
 
-    pub fn build(self) -> raft::Raft {
+    fn activate(&mut self, raft_settings: RaftSettings) -> AppRaft {
+        info!("Starting raft");
+
+        let shared_network_state = node::SharedNetworkState::new();
+
+        let membership: actix_raft::messages::MembershipConfig =
+            actix_raft::messages::MembershipConfig {
+                is_in_joint_consensus: false,
+                members: raft_settings.members.clone(),
+                non_voters: vec![],
+                removing: vec![],
+            };
+
+        let node_tracker = node::NodeTracker::new();
+
+        // Start the various actor types and hold on to their addrs.
+        let network = raft::AppNetwork::new(
+            shared_network_state.clone(),
+            raft_settings.node_id,
+            node_tracker.start(),
+        );
+        let storage = raft::AppStorage::new(shared_network_state.clone(), membership);
+        let metrics = raft::AppMetrics {};
+        let network_addr = network.start();
+
+        let config =
+            actix_raft::Config::build(String::from(raft_settings.snapshot_dir.clone()))
+                .validate()
+                .unwrap();
+
+        AppRaft::new(
+            raft_settings.node_id,
+            config,
+            network_addr.clone(),
+            storage.start(),
+            metrics.start().recipient(),
+        )
+    }
+
+    pub fn build(mut self) -> crate::AppRaft {
         let mut members = vec![self.node_id];
 
         for node in self.discovered_nodes.iter() {
             members.push(node.id);
         }
 
-        raft::Raft::new(
-            RaftSettings {
-                snapshot_dir: self.snapshot_dir.unwrap_or("./".to_string()),
-                members: members,
-                discovered_nodes: self.discovered_nodes,
-                rpc_port: self.rpc_port,
-                rpc_host: self.rpc_host,
-                node_id: self.node_id,
-            },
-            HttpRpcClient::new(),
-        )
+        let settings = RaftSettings {
+            snapshot_dir: self.snapshot_dir.clone().unwrap_or("./".to_string()),
+            members: members,
+            discovered_nodes: self.discovered_nodes.clone(),
+            rpc_port: self.rpc_port,
+            rpc_host: self.rpc_host.clone(),
+            node_id: self.node_id,
+        };
+
+        self.activate(settings)
     }
 }

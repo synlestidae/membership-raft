@@ -15,69 +15,23 @@ use tokio::time::Delay;
 use std::time::Duration;
 
 pub struct Raft {
-    raft_settings: raft::RaftSettings,
+    //raft_settings: raft::RaftSettings,
     http_rpc_client: rpc::HttpRpcClient,
-    pub raft_addr: Option<actix::Addr<AppRaft>>,
+    raft_addr: actix::Addr<AppRaft>,
 }
 
 impl Raft {
     pub fn new(
-        raft_settings: raft::RaftSettings,
         http_rpc_client: rpc::HttpRpcClient,
+        raft_addr: actix::Addr<AppRaft>,
     ) -> Self {
         Self {
-            raft_settings,
-            http_rpc_client,
-            raft_addr: None,
+            raft_addr,
+            http_rpc_client
         }
     }
 
-    pub fn activate(&mut self) -> actix::Addr<AppRaft> {
-        info!("Starting raft");
-
-        let shared_network_state = node::SharedNetworkState::new();
-
-        let membership: actix_raft::messages::MembershipConfig =
-            actix_raft::messages::MembershipConfig {
-                is_in_joint_consensus: false,
-                members: self.raft_settings.members.clone(),
-                non_voters: vec![],
-                removing: vec![],
-            };
-
-        let node_tracker = node::NodeTracker::new();
-
-        // Start the various actor types and hold on to their addrs.
-        let network = raft::AppNetwork::new(
-            shared_network_state.clone(),
-            self.raft_settings.node_id,
-            node_tracker.start(),
-        );
-        let storage = raft::AppStorage::new(shared_network_state.clone(), membership);
-        let metrics = raft::AppMetrics {};
-        let network_addr = network.start();
-
-        let config =
-            actix_raft::Config::build(String::from(self.raft_settings.snapshot_dir.clone()))
-                .validate()
-                .unwrap();
-
-        let app_raft = AppRaft::new(
-            self.raft_settings.node_id,
-            config,
-            network_addr.clone(),
-            storage.start(),
-            metrics.start().recipient(),
-        );
-
-        let addr = app_raft.start();
-
-        self.raft_addr = Some(addr.clone());
-
-        info!("Raft has now started");
-
-        addr
-    }
+    
 }
 
 impl actix::Actor for Raft {
@@ -104,24 +58,15 @@ impl actix::Handler<messages::CreateClusterRequest> for Raft {
     ) -> Self::Result {
         info!("Creating a cluster: {:?}", msg);
 
-        match self.raft_addr {
-            Some(ref mut addr) => {
-                    info!("Sending to cluster");
-                    let request = addr.send(admin::InitWithConfig {
-                        members: vec![msg.this_node.id],
-                    });
+        info!("Sending to cluster");
+        let request = self.raft_addr.send(admin::InitWithConfig {
+            members: vec![msg.this_node.id],
+        });
 
-                    RaftFut(Box::new(request.then(|res| RaftFut(match res {
-                        Ok(Ok(result)) => Box::new(futures::future::ok(result)),
-                        _ => Box::new(futures::future::err(()))
-                    }))))
-            }
-            None => {
-                error!("Raft has not initialized with an address");
-
-                RaftFut(Box::new(futures::future::err(())))
-            }
-        }
+        RaftFut(Box::new(request.then(|res| RaftFut(match res {
+            Ok(Ok(result)) => Box::new(futures::future::ok(result)),
+            _ => Box::new(futures::future::err(()))
+        }))))
     }
 }
 
