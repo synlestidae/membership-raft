@@ -1,5 +1,5 @@
 use crate::node::AppNode;
-use std::error::Error;
+use crate::raft::RaftFut;
 use std::time::Instant;
 
 #[derive(Clone, Debug)]
@@ -27,8 +27,12 @@ impl NodeEvent {
     }
 }
 
+impl actix::Message for NodeEvent {
+    type Result = RaftFut<(), ()>;
+}
+
 #[derive(Clone, Debug)]
 pub enum NodeEventType {
     Ok,
-    Err, //(Box<dyn Error + Clone + std::fmt::Debug>)
+    Err,
 }

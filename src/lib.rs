@@ -20,20 +20,17 @@ extern crate toml;
 use crate::actix::Actor;
 use crate::clap::Clap;
 use crate::futures::Future;
-use actix_raft::admin;
-use actix_raft::messages;
-use actix_raft::Config as RaftConfig;
+use crate::node::NodeTracker;
 use actix_raft::Raft;
 use log::{error, info};
-use std::sync::mpsc::channel;
 
 mod config;
 mod discovery;
 mod error;
+mod messages;
 mod node;
 mod raft;
 mod rpc;
-mod startup;
 
 /// The application's data response types.
 ///
@@ -54,7 +51,7 @@ pub fn main() {
 
     info!("Opts: {:?}", opts);
 
-    let node_config: config::Config = match opts.config {
+    let config: config::Config = match opts.config {
         Some(config_path) => {
             info!("Loading config from {}", config_path);
             let config_string = std::fs::read_to_string(config_path).unwrap();
@@ -69,254 +66,96 @@ pub fn main() {
 
     let node_id = rand::random();
 
-    info!("Node config: {:?}", node_config);
+    info!("This node's ID is {}", node_id);
+    info!("Node config: {:?}", config);
 
     let shared_network_state = node::SharedNetworkState::new();
 
     shared_network_state.register_node(
         node_id,
-        node_config.name.clone(),
-        node_config.webserver.host.clone(),
-        node_config.webserver.port,
+        config.name.clone(),
+        config.rpc_host.clone(),
+        config.rpc_port,
     );
-
-    let http_rpc_client = rpc::HttpRpcClient::new();
 
     // Build the actix system.
     let mut sys = actix::System::new("my-awesome-app");
 
-    // Build the needed runtime config for Raft specifying where
-    // snapshots will be stored. See the storage chapter for more details.
-    let config = RaftConfig::build(String::from("./snapshots"))
-        .validate()
-        .unwrap();
+    let mut builder = crate::raft::RaftBuilder::new(node_id);
 
-    /* match (opts.node_id, node_config.node_id) {
-        (Some(n), _) => n,
-        (_, Some(n)) => n,
-        _ =>
-    };*/
+    builder
+        .snapshot_dir("./snapshots/")
+        .bootstrap_hosts(config.bootstrap_hosts)
+        .rpc_host(&config.rpc_host)
+        .rpc_port(config.rpc_port);
 
-    info!("This node's ID is {}", node_id);
-
-    let bootstrap_hosts = node_config.bootstrap_hosts.clone();
-
-    let needs_to_join = !node_config.new_cluster;
-
-    let known_nodes = if needs_to_join {
-        if bootstrap_hosts.len() == 0 {
-            error!("Need at least one bootstrap host");
-
-            std::process::exit(1);
-        } else {
-            info!("Bootstrap hosts: {:?}", bootstrap_hosts);
-        }
-
-        let mut nodes = vec![];
-
-        for host in bootstrap_hosts {
-            use crate::rpc::RpcClient;
-            info!("Getting members from {}", host);
-
-            let shared_network_state2 = shared_network_state.clone();
-
-            actix::Arbiter::spawn(
-                http_rpc_client
-                    .get_nodes(
-                        &reqwest::Url::parse(&format!("http://{}/rpc", host))
-                            .expect("Failed to parse URL"),
-                    )
-                    .map(|nodes| {
-                        nodes.into_iter().for_each(move |n| {
-                            shared_network_state2.register_node(
-                                n.id,
-                                n.name.clone(),
-                                n.host.clone(),
-                                n.port,
-                            )
-                        })
-                    })
-                    .map_err(|err| error!("Error creating session: {:?}", err)),
-            );
-
-            //nodes.append(&mut new_nodes.into_iter().map(|n| n.id).collect());
-        }
-
-        nodes
-    } else {
-        info!("Going to start a new cluster");
-        vec![]
-    };
-
-    // Start off with just a single node in the cluster. Applications
-    // should implement their own discovery system. See the cluster
-    // formation chapter for more details.
-    let mut members = if needs_to_join {
-        vec![node_id] //bootstrap_nodes[0].id,
-    } else {
-        vec![node_id]
-    };
-
-    for n in known_nodes {
-        members.push(n);
-    }
-
-    /*for node in node_config.bootstrap_nodes.iter() {
-        members.push(node.id);
-    }*/
-
-    let non_voters = vec![];
-
-    let membership: messages::MembershipConfig = messages::MembershipConfig {
-        is_in_joint_consensus: false,
-        members: members.clone(),
-        non_voters: non_voters,
-        removing: vec![],
-    };
-
-    info!("Existing members: {:?}", members);
-
-    let init_with_config = admin::InitWithConfig {
-        members: vec![node_id],
-    };
-
-    let (sndr, recv) = channel();
-
-    // Start the various actor types and hold on to their addrs.
-    let network = raft::AppNetwork::new(
-        shared_network_state.clone(),
-        node_id,
-        &node_config.webserver,
-        sndr,
-    );
-    let storage = raft::AppStorage::new(shared_network_state.clone(), membership);
-    let metrics = raft::AppMetrics {};
-    let network_addr = network.start();
-
-    let app_raft = AppRaft::new(
-        node_id,
-        config,
-        network_addr.clone(),
-        storage.start(),
-        metrics.start().recipient(),
-    );
-
-    let port = node_config.webserver.port;
-
-    let app_raft_address = app_raft.start();
-
-    let raft_addr = app_raft_address.clone();
-
-    let startup = startup::StartupActor {
-        node_id,
-        raft_addr: raft_addr.clone(),
-        http_rpc_client: http_rpc_client.clone(),
-    };
-
-    let startup_addr = startup.start();
-
-    let mut webserver = rpc::WebServer::new(
-        port,
-        app_raft_address.clone(),
-        shared_network_state.clone(),
-        node_id,
-    );
-
-    std::thread::spawn(move || webserver.start(node_id));
-
-    std::thread::spawn(move || {
-        use crate::node::NodeStateMachine;
-        use std::collections::BTreeMap;
-        use std::time::Duration;
-
-        let mut nodes: BTreeMap<u64, _> = BTreeMap::new();
-
-        for node_event in recv.iter() {
-            let node_id = node_event.node.id;
-            let is_err = {
-                let entry = nodes.entry(node_event.node.id);
-                let state_machine = entry.or_insert(NodeStateMachine::new(Duration::new(5, 0)));
-                state_machine.transition(node_event);
-
-                info!("Node state for {}: {:?}", node_id, state_machine);
-
-                state_machine.is_err()
-            };
-
-            if is_err {
-                use crate::futures::Future;
-
-                error!("Node {} has FAILED!", node_id);
-                match raft_addr
-                    .send(admin::ProposeConfigChange::new(vec![], vec![node_id]))
-                    .wait()
-                {
-                    Ok(Ok(info)) => {
-                        nodes.remove(&node_id);
-                        info!(
-                            "Successfully removed node {} from the cluster: {:?}",
-                            node_id, info
-                        );
-                    }
-                    Ok(Err(admin::ProposeConfigChangeError::InoperableConfig)) => {
-                        error!("Removing node would leave cluster inoperable");
-                    }
-                    Ok(Err(admin::ProposeConfigChangeError::Noop)) => {
-                        nodes.remove(&node_id);
-                        info!("Node already removed");
-                    }
-                    Ok(Err(admin::ProposeConfigChangeError::NodeNotLeader(_))) => {
-                        nodes.remove(&node_id);
-                        error!("This node is no longer leader")
-                    }
-                    Ok(Err(err)) => error!("Error removing node: {:?}", err),
-                    Err(err) => error!("Utter failure removing node: {:?}", err),
-                };
-            }
-        }
-    });
-
-    info!("Starting up...");
-
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::new(5, 0));
-
-        let msg = if node_config.new_cluster {
-            startup::StartupRequest::NewCluster {
-                config: node_config,
-                cluster_config: startup::ClusterConfig {},
-            }
-        } else {
-            startup::StartupRequest::ExistingCluster {
-                config: node_config,
-            }
-        };
-
-        match startup_addr.send(msg).wait() {
-            Ok(res) => info!("Successfully started up: {:?}", res),
+    let nodes = if !config.is_new_cluster {
+        let discovery = match builder.discovery() {
+            Ok(d) => d,
             Err(err) => {
-                error!("Failed to start up: {:?}", err);
+                error!("Could not build node: {:?}", err);
 
                 std::process::exit(1)
             }
+        };
+
+        match sys.block_on(discovery.nodes()) {
+            Ok(nodes) => nodes,
+            Err(err) => {
+                error!("Could not discover existing nodes: {:?}", err);
+
+                std::process::exit(1);
+            }
         }
-    });
+    } else {
+        vec![]
+    };
 
-    //use crate::futures::Future;
+    let this_node: crate::node::AppNode = node::AppNode {
+        id: node_id,
+        name: config.name.to_string(),
+        host: config.rpc_host.to_string(),
+        port: config.rpc_port,
+    };
 
-    /*let res = startup_addr.send(msg);*/
+    let raft = builder.build();
 
-    /*match sys.block_on(startup_fut) {
-        Ok(res) => info!("Successfully started up: {:?}", res),
-        Err(err) => {
-            error!("Failed to start up: {:?}", err);
+    let raft_addr = raft.start();
 
-            std::process::exit(1);
-        }
-    }*/
+    if config.is_new_cluster {
+        info!("Starting a new cluster");
+
+        actix::prelude::Arbiter::spawn(
+            raft_addr
+                .send(messages::CreateClusterRequest { this_node })
+                .map(|result| info!("Result from creating cluster: {:?}", result))
+                .map_err(|err| {
+                    error!("Error while creating cluster: {:?}", err);
+
+                    std::thread::sleep(std::time::Duration::new(1, 0));
+
+                    std::process::exit(1);
+                }),
+        );
+    } else {
+        info!("Joining an existing cluster");
+
+        actix::prelude::Arbiter::spawn(
+            raft_addr
+                .send(messages::JoinClusterRequest { this_node, nodes })
+                .map(|result| info!("Result from joining cluster: {:?}", result))
+                .map_err(|err| {
+                    error!("Error while joining existing cluster: {:?}", err);
+
+                    std::thread::sleep(std::time::Duration::new(1, 0));
+
+                    std::process::exit(1);
+                }),
+        );
+    }
 
     match sys.run() {
         Err(err) => error!("Error in runtime: {:?}", err),
-        Ok(_) => {}
+        Ok(r) => info!("Shutting down: {:?}", r),
     };
 }

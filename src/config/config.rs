@@ -1,3 +1,4 @@
+use crate::config::Opts;
 use crate::node::AppNode;
 use actix_raft::NodeId;
 use serde::{Deserialize, Serialize};
@@ -7,12 +8,11 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub name: String,
     pub bootstrap_hosts: Vec<String>,
-    pub webserver: WebserverConfig,
-    pub new_cluster: bool,
+    pub is_new_cluster: bool,
+    pub rpc_host: String,
+    pub rpc_port: u16,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct WebserverConfig {
-    pub host: String,
-    pub port: u16,
+impl Config {
+    pub fn use_opts(&mut self, opts: &Opts) {}
 }

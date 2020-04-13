@@ -16,7 +16,7 @@ pub struct StartupActor {
     http_rpc_client: HttpRpcClient,
 }
 
-impl StartupActor {
+/*impl StartupActor {
     pub fn new(
         node_id: actix_raft::NodeId,
         raft_addr: actix::Addr<AppRaft>,
@@ -36,7 +36,7 @@ impl actix::Actor for StartupActor {
     fn started(&mut self, _ctx: &mut Self::Context) {
         info!("StartupActor has started");
     }
-}
+}*/
 
 #[derive(Debug)]
 pub struct ClusterConfig {}

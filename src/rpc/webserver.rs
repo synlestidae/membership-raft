@@ -9,6 +9,7 @@ use actix_raft::NodeId;
 use bincode;
 use rocket;
 use rocket::config::{Config, ConfigBuilder, Environment};
+use rocket::error::LaunchError;
 use rocket::handler::Outcome;
 use rocket::http::ContentType;
 use rocket::http::Method;
@@ -22,12 +23,32 @@ use rocket::Response;
 use rocket::Route;
 use std::convert::From;
 use std::io::Read;
+use std::thread::{spawn, JoinHandle};
 
 pub struct WebServer {
     addr: Addr<AppRaft>,
     shared_network: SharedNetworkState,
     rocket_config: Config,
     node_id: NodeId,
+    webserver_thread: Option<JoinHandle<LaunchError>>,
+}
+
+impl actix::Actor for WebServer {
+    type Context = actix::Context<Self>;
+
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        let post_handler = PostHandler {
+            node_id: self.node_id,
+            addr: self.addr.clone(),
+            shared_network: self.shared_network.clone(),
+        };
+
+        let route = Route::new(Method::Post, "/rpc", post_handler);
+
+        let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![route]);
+
+        self.webserver_thread = Some(spawn(move || rocket.launch()));
+    }
 }
 
 #[derive(Debug)]
@@ -199,8 +220,7 @@ impl PostHandler {
                 let proposal_result = self
                     .addr
                     .send(admin::ProposeConfigChange::new(vec![new_node.id], vec![]))
-                    .wait()
-                    .unwrap();
+                    .wait()?;
 
                 serde_json::to_value(match proposal_result {
                     Ok(()) => CreateSessionResponse::Success {
@@ -268,25 +288,12 @@ impl WebServer {
             addr,
             shared_network: shared_network_state,
             node_id,
+            webserver_thread: None,
             rocket_config: ConfigBuilder::new(Environment::Staging)
                 .address("0.0.0.0")
                 .port(port)
                 .finalize()
                 .unwrap(),
         }
-    }
-
-    pub fn start(&mut self, node_id: NodeId) {
-        let post_handler = PostHandler {
-            node_id,
-            addr: self.addr.clone(),
-            shared_network: self.shared_network.clone(),
-        };
-
-        let route = Route::new(Method::Post, "/rpc", post_handler);
-
-        let rocket = rocket::custom(self.rocket_config.clone()).mount("/", vec![route]);
-
-        rocket.launch();
     }
 }

@@ -1,14 +1,20 @@
-use actix::prelude::Future;
-use actix;
-use actix_raft::NodeId;
-use actix_raft::admin;
-use crate::AppRaft;
 use crate::node;
+use crate::rpc;
 use crate::rpc::CreateSessionResponse;
 use crate::rpc::HttpRpcClient;
 use crate::rpc::RpcClient;
-use crate::rpc;
+use crate::AppRaft;
+use actix;
+use actix::prelude::Future;
+use actix_raft::admin;
+use actix_raft::NodeId;
 use log::*;
+
+mod create_cluster_request;
+mod join_cluster_request;
+
+pub use create_cluster_request::*;
+pub use join_cluster_request::*;
 
 pub struct StartupActor {
     node_id: actix_raft::NodeId,
@@ -58,7 +64,7 @@ impl actix::Message for StartupRequest {
 
 #[derive(Debug)]
 pub struct StartupResponse {
-    leader_node_id: NodeId,
+    pub leader_node_id: NodeId,
 }
 
 #[derive(Debug)]
@@ -106,8 +112,8 @@ impl actix::Handler<StartupRequest> for StartupActor {
                     new_node: node::AppNode {
                         id: self.node_id,
                         name: config.name.to_string(),
-                        host: config.webserver.host.clone(),
-                        port: config.webserver.port,
+                        host: config.rpc_host.clone(),
+                        port: config.rpc_port,
                     },
                 };
                 let url = reqwest::Url::parse(&format!("http://{}/rpc", config.bootstrap_hosts[0]))

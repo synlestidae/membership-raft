@@ -1,9 +1,9 @@
-use crate::config::WebserverConfig;
-use crate::node::NodeEvent;
+use crate::node::NodeTracker;
 use crate::node::SharedNetworkState;
 use crate::raft::Transition;
 use crate::rpc::HttpRpcClient;
 use crate::rpc::RpcClient;
+use actix;
 use actix::{Actor, Context, Handler};
 use actix_raft::messages::InstallSnapshotRequest;
 use actix_raft::messages::InstallSnapshotResponse;
@@ -13,14 +13,12 @@ use actix_raft::NodeId;
 use actix_raft::{messages, RaftNetwork};
 use futures::Future;
 use log::debug;
-use std::sync::mpsc::Sender;
 
 /// Your application's network interface actor.
 pub struct AppNetwork {
     shared_network_state: SharedNetworkState,
     node_id: NodeId,
-    webserver: WebserverConfig,
-    node_event_sender: Sender<NodeEvent>,
+    node_tracker: actix::Addr<crate::NodeTracker>,
     rpc_client: HttpRpcClient,
 }
 
@@ -28,14 +26,12 @@ impl AppNetwork {
     pub fn new(
         shared_network_state: SharedNetworkState,
         node_id: NodeId,
-        webserver: &WebserverConfig,
-        node_event_sender: Sender<NodeEvent>,
+        node_tracker: actix::Addr<NodeTracker>,
     ) -> Self {
         Self {
             shared_network_state,
             node_id,
-            webserver: webserver.clone(),
-            node_event_sender,
+            node_tracker,
             rpc_client: HttpRpcClient::new(),
         }
     }
@@ -64,26 +60,25 @@ impl Handler<messages::AppendEntriesRequest<Transition>> for AppNetwork {
     ) -> Self::Result {
         let node_option = self.shared_network_state.get_node(msg.target);
 
-        if let Some(node) = node_option {
-            let node_ok = NodeEvent::ok(&node);
-            let node_err = NodeEvent::err(&node);
+        //let addr = self.
 
-            let sender1 = self.node_event_sender.clone();
-            let sender2 = self.node_event_sender.clone();
+        if let Some(node) = node_option {
+            let node_tracker_addr = self.node_tracker.clone();
 
             Box::new(
                 self.rpc_client
                     .append_entries(&node.rpc_url(), msg)
-                    .map(move |resp| {
-                        drop(sender1.send(node_ok));
+                    .then(move |result| {
+                        /*match result {
+                            Ok(response) => node_tracker_addr.send(NodeEvent::ok(&node)),
+                            Err(err) => node_tracker_addr.send(NodeEvent::err(&node))
+                        };*/
 
-                        resp
+                        //Box::new(fut.then(|_| result))
+
+                        result
                     })
-                    .map_err(move |_| {
-                        drop(sender2.send(node_err));
-
-                        ()
-                    }),
+                    .map_err(|_| ()),
             )
         } else {
             panic!("Unsure where to send this")

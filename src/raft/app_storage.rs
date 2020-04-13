@@ -41,11 +41,6 @@ impl AppStorage {
 
         self.logs.push(entry);
         Ok(())
-
-        /*if self.logs.len() == entry.index as usize {
-        } else {
-            Ok(())
-        }*/
     }
 
     fn apply_to_state_machine(&mut self, data: Transition) {
