@@ -84,7 +84,7 @@ pub fn real_main() {
     );
 
     // Build the actix system.
-    //let mut sys = actix::System::new("my-awesome-app");
+    //let sys = actix::System::current();//new("my-awesome-app");
 
     let mut builder = crate::raft::RaftBuilder::new(node_id);
 
@@ -104,7 +104,7 @@ pub fn real_main() {
             }
         };
 
-        match sys.block_on(discovery.nodes()) {
+        match discovery.nodes().wait() {
             Ok(nodes) => nodes,
             Err(err) => {
                 error!("Could not discover existing nodes: {:?}", err);
@@ -137,45 +137,44 @@ pub fn real_main() {
 
     if is_new_cluster {
         info!("COnnected? {}", raft_addr.connected());
-        sys.block_on(
-            raft_addr
-                .send(messages::CreateClusterRequest { this_node })
-                .map(|result| info!("Result from creating cluster: {:?}", result))
-                .map_err(|err| {
-                    error!("Error while creating cluster: {:?}", err);
+        raft_addr
+            .send(messages::CreateClusterRequest { this_node })
+            .map(|result| info!("Result from creating cluster: {:?}", result))
+            .map_err(|err| {
+                error!("Error while creating cluster: {:?}", err);
 
-                    std::thread::sleep(std::time::Duration::new(1, 0));
+                std::thread::sleep(std::time::Duration::new(1, 0));
 
-                    //std::process::exit(1);
-                }),
-        );
+                //std::process::exit(1);
+            })
+            .wait()
+            .expect("Failed to create a new cluster");
     } else {
-        sys.block_on(
-            raft_addr
-                .send(messages::JoinClusterRequest { this_node, nodes })
-                .map(|result| info!("Result from joining cluster: {:?}", result))
-                .map_err(|err| {
-                    error!("Error while joining existing cluster: {:?}", err);
+        raft_addr
+            .send(messages::JoinClusterRequest { this_node, nodes })
+            .map(|result| info!("Result from joining cluster: {:?}", result))
+            .map_err(|err| {
+                error!("Error while joining existing cluster: {:?}", err);
 
-                    std::thread::sleep(std::time::Duration::new(1, 0));
+                std::thread::sleep(std::time::Duration::new(1, 0));
 
-                    //std::process::exit(1);
-                })
-        );
+                //std::process::exit(1);
+            })
+            .wait()
+            .expect("Failed to join an existing cluster");
     }
 
-    match sys.block_on(app_addr.clone().send(actix_raft::admin::InitWithConfig::new(vec![node_id]))) {
+    match app_addr.clone().send(actix_raft::admin::InitWithConfig::new(vec![node_id])).wait() {
         Ok(res) => info!("GOOD? {:?}", res),
         Err(err) => error!("BAD: {:?}", err)
     };
 
 
-    info!("Starting runtime");
+    //info!("Starting runtime");
 
-    match sys.run() {
+    /*match sys.run() {
         Err(err) => error!("Error in runtime: {:?}", err),
         Ok(r) => info!("Shutting down: {:?}", r),
-    };
-
+    };*/
     drop(raft_addr);
 }
