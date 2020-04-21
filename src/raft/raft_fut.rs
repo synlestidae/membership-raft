@@ -14,6 +14,12 @@ impl<T: Send, E: Send> Future for RaftFut<T, E> {
     }
 }
 
+impl<T: Send, E: Send> RaftFut<T, E> {
+    pub fn from<F: Future<Item = T, Error = E> + 'static>(fut: F) -> RaftFut<T, E> {
+        RaftFut(Box::new(fut))
+    }
+}
+
 impl<T: Send, E: Send, A: actix::Actor, M: actix::Message> MessageResponse<A, M> for RaftFut<T, E> {
     fn handle<R: ResponseChannel<M>>(self, _ctx: &mut A::Context, _tx: Option<R>) {}
 }

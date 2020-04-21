@@ -24,6 +24,8 @@ use crate::futures::Future;
 use crate::node::NodeTracker;
 use actix_raft::Raft;
 use log::{error, info};
+use crate::raft::RaftFut;
+use tokio::time::delay_for;
 
 mod config;
 mod discovery;
@@ -47,7 +49,8 @@ type AppRaft =
     Raft<raft::Transition, raft::DataResponse, error::Error, raft::AppNetwork, raft::AppStorage>;
 
 pub fn main() {
-    actix::System::run(real_main);
+    //actix::System::run(real_main);
+    real_main();
 }
 
 pub fn real_main() {
@@ -84,7 +87,7 @@ pub fn real_main() {
     );
 
     // Build the actix system.
-    //let sys = actix::System::current();//new("my-awesome-app");
+    let sys = actix::System::new("my-awesome-app");
 
     let mut builder = crate::raft::RaftBuilder::new(node_id);
 
@@ -124,57 +127,45 @@ pub fn real_main() {
     };
 
     let app_raft = builder.build();
-    let app_addr = app_raft.start();
+    let raft = raft::Raft::new(crate::rpc::HttpRpcClient::new(), app_raft.start());
 
-    let raft = raft::Raft::new(crate::rpc::HttpRpcClient::new(), app_addr.clone());
-
-    let raft_addr = raft.start();
     let is_new_cluster = config.is_new_cluster;
 
-    info!("Starting the node");
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::new(5, 0));
+        info!("Starting the node");
 
-    //sys.block_on(tokio::time::delay_for(tokio::time::Duration::new(2, 0)));
+        let startup_fut = if is_new_cluster {
+            RaftFut::from(raft
+                .create_cluster(messages::CreateClusterRequest { this_node })
+                .map(|result| info!("Result from creating cluster: {:?}", result))
+                .map_err(|err| {
+                    error!("Error while creating cluster: {:?}", err);
 
-    if is_new_cluster {
-        info!("COnnected? {}", raft_addr.connected());
-        raft_addr
-            .send(messages::CreateClusterRequest { this_node })
-            .map(|result| info!("Result from creating cluster: {:?}", result))
-            .map_err(|err| {
-                error!("Error while creating cluster: {:?}", err);
+                    std::thread::sleep(std::time::Duration::new(1, 0));
 
-                std::thread::sleep(std::time::Duration::new(1, 0));
+                    std::process::exit(1);
+                }))
+        } else {
+            RaftFut::from(raft.join_cluster(messages::JoinClusterRequest { this_node, nodes })
+                .map(|result| info!("Result from joining the cluster: {:?}", result))
+                .map_err(|err| {
+                    error!("Error while joining existing cluster: {:?}", err);
 
-                //std::process::exit(1);
-            })
-            .wait()
-            .expect("Failed to create a new cluster");
-    } else {
-        raft_addr
-            .send(messages::JoinClusterRequest { this_node, nodes })
-            .map(|result| info!("Result from joining cluster: {:?}", result))
-            .map_err(|err| {
-                error!("Error while joining existing cluster: {:?}", err);
+                    std::thread::sleep(std::time::Duration::new(1, 0));
 
-                std::thread::sleep(std::time::Duration::new(1, 0));
+                    std::process::exit(1);
+                }))
+        };
 
-                //std::process::exit(1);
-            })
-            .wait()
-            .expect("Failed to join an existing cluster");
+        match startup_fut.wait() {
+            Ok(result) => info!("Result of starting up: {:?}", result),
+            Err(err) => error!("Error starting up: {:?}", err)
+        }
+    });
+
+    match sys.run() {
+        Ok(result) => info!("Finished running actix: {:?}", result),
+        Err(err) => error!("Error running actix: {:?}", err)
     }
-
-    match app_addr.clone().send(actix_raft::admin::InitWithConfig::new(vec![node_id])).wait() {
-        Ok(res) => info!("GOOD? {:?}", res),
-        Err(err) => error!("BAD: {:?}", err)
-    };
-
-
-    //info!("Starting runtime");
-
-    /*match sys.run() {
-        Err(err) => error!("Error in runtime: {:?}", err),
-        Ok(r) => info!("Shutting down: {:?}", r),
-    };*/
-    drop(raft_addr);
 }

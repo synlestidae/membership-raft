@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 actix = "0.8.3"
+actix-rt = "0.2.3"
 actix-raft = "0.4.3"
 serde = "1.0.105"
 bincode = "1.2.1"

@@ -15,7 +15,6 @@ use tokio::time::Delay;
 use std::time::Duration;
 
 pub struct Raft {
-    //raft_settings: raft::RaftSettings,
     http_rpc_client: rpc::HttpRpcClient,
     raft_addr: actix::Addr<AppRaft>,
 }
@@ -48,14 +47,19 @@ impl actix::Actor for Raft {
     }
 }
 
-impl actix::Handler<messages::CreateClusterRequest> for Raft {
-    type Result = RaftFut<(), ()>; //actix::ResponseActFuture<Self, (), ()>;
+impl Raft {
+    pub fn join_cluster(&self, msg: messages::JoinClusterRequest) -> RaftFut<rpc::CreateSessionResponse, rpc::RpcError> {
+        info!("Joining a cluster: {:?}", msg);
 
-    fn handle(
-        &mut self,
-        msg: messages::CreateClusterRequest,
-        _: &mut Self::Context,
-    ) -> Self::Result {
+        RaftFut(Box::new(self.http_rpc_client.join_cluster(
+            &msg.this_node.rpc_url(),
+            rpc::CreateSessionRequest {
+                new_node: msg.this_node,
+            },
+        )))
+    }
+
+    pub fn create_cluster(&self, msg: messages::CreateClusterRequest) -> RaftFut<(), ()> {
         info!("Creating a cluster: {:?}", msg);
 
         info!("Sending to cluster");
@@ -67,20 +71,5 @@ impl actix::Handler<messages::CreateClusterRequest> for Raft {
             Ok(Ok(result)) => Box::new(futures::future::ok(result)),
             _ => Box::new(futures::future::err(()))
         }))))
-    }
-}
-
-impl actix::Handler<messages::JoinClusterRequest> for Raft {
-    type Result = RaftFut<rpc::CreateSessionResponse, rpc::RpcError>;
-
-    fn handle(&mut self, msg: messages::JoinClusterRequest, _: &mut Self::Context) -> Self::Result {
-        info!("Joining a cluster: {:?}", msg);
-
-        RaftFut(Box::new(self.http_rpc_client.join_cluster(
-            &msg.this_node.rpc_url(),
-            rpc::CreateSessionRequest {
-                new_node: msg.this_node,
-            },
-        )))
     }
 }
