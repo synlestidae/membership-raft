@@ -13,20 +13,24 @@ use crate::futures::Future;
 use crate::actix::Actor;
 use tokio::time::Delay;
 use std::time::Duration;
+use crate::rpc::WebServer;
 
 pub struct Raft {
     http_rpc_client: rpc::HttpRpcClient,
     raft_addr: actix::Addr<AppRaft>,
+    webserver_addr: actix::Addr<WebServer>
 }
 
 impl Raft {
     pub fn new(
         http_rpc_client: rpc::HttpRpcClient,
         raft_addr: actix::Addr<AppRaft>,
+        webserver_addr: actix::Addr<WebServer>
     ) -> Self {
         Self {
             raft_addr,
-            http_rpc_client
+            http_rpc_client,
+            webserver_addr
         }
     }
 
